@@ -1,0 +1,3774 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Handschrift-Tool — Komplett (Glyphs / Background / Render)</title>
+
+<!-- Drittbibliotheken -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.0/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.10.111/build/pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.10.111/build/pdf.worker.min.js';</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+  :root { --bg:#f6f7fb; --panel:#fff; --muted:#667; --accent:#0b76ff; }
+  body { font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; background:var(--bg); padding:14px; color:#122; margin:0; }
+  h1 { font-size:1.05rem; margin:0 0 10px 0; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .tab { padding:8px 12px; border-radius:8px; border:1px solid #dbe6f2; background:white; cursor:pointer; }
+  .tab.active { background:var(--accent); color:white; border-color:var(--accent); }
+
+  .panel { background:var(--panel); border:1px solid #e2e8f0; padding:12px; border-radius:10px; box-shadow:0 1px 0 rgba(0,0,0,0.03); margin-bottom:12px; }
+  .layout { display:flex; gap:12px; align-items:flex-start; }
+
+  label.small { display:block; color:var(--muted); font-size:0.88rem; margin-bottom:6px; }
+
+  .glyph-grid { display:flex; flex-wrap:wrap; gap:6px; max-height:220px; overflow:auto; padding-top:6px; }
+  .glyph-btn { min-width:36px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e7eefb; background:white; cursor:pointer; font-weight:600; }
+  .glyph-btn.active { background:var(--accent); color:white; border-color:var(--accent); }
+
+  button,input,select,textarea { padding:8px 10px; border-radius:8px; border:1px solid #c9ced6; background:white; font-size:0.95rem; }
+  button:hover { filter:brightness(.98); cursor:pointer; }
+
+  /* Glyph canvas portrait 1:3 */
+  #glyphDrawWrap { width:220px; height:330px; border-radius:8px; overflow:hidden; background:white; border:1px solid #e2e8f0; display:flex; align-items:center; justify-content:center; position:relative; }
+  #glyphCanvas { width:100%; height:100%; display:block; touch-action:none; }
+
+  /* scale handle shown at bottom-right of glyph canvas */
+  #glyphScaleHandle { position:absolute; right:8px; bottom:8px; width:20px; height:20px; background:var(--accent); border-radius:6px; cursor:nwse-resize; box-shadow:0 2px 6px rgba(0,0,0,0.12); display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; user-select:none; touch-action:none; z-index:10; }
+  #glyphResizeHandle { position:absolute; right:8px; bottom:36px; width:20px; height:20px; background:#10b981; border-radius:6px; cursor:se-resize; box-shadow:0 2px 6px rgba(0,0,0,0.12); display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; user-select:none; touch-action:none; z-index:10; }
+  #glyphMoveHandle { position:absolute; right:36px; bottom:8px; width:20px; height:20px; background:#6b7280; border-radius:6px; cursor:move; box-shadow:0 2px 6px rgba(0,0,0,0.12); display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; user-select:none; touch-action:none; z-index:10; }
+  /* use all-scroll to better match Windows 4-way move cursor appearance */
+  #glyphMoveHandle { cursor: all-scroll; }
+
+  /* Background canvas */
+  #bgCanvasWrap { width:100%; max-width:760px; border-radius:8px; overflow:hidden; background:white; border:1px solid #e6eef7; display:flex; justify-content:center; align-items:center; }
+  #bgCanvas { width:100%; height:auto; display:block; touch-action:none; }
+  .lineLabel { position:absolute; left:8px; background:rgba(255,255,255,0.95); border-radius:6px; padding:6px 8px; font-size:0.85rem; border:1px solid #d6e0ee; cursor:move; display:flex; align-items:center; gap:8px; }
+  .lineLabel.vertical { left:auto; right:8px; flex-direction:column; padding:8px 4px; background:transparent; border:none; }
+  .lineLabel .lineGrip { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.9); border-radius:4px; border:1px solid #d6e0ee; font-size:12px; color:#334; cursor:grab; }
+  .lineLabel.vertical .lineGrip { background:rgba(200,100,200,0.7); border:1px solid #d197d1; }
+  .lineLabel.vertical > span:not(.lineGrip) { display:none; }
+  .lineLabel.dragging { opacity:0.95; }
+  .lineLabel.dragging .lineGrip { cursor:grabbing; }
+
+  /* Renderer UI */
+  #renderPreviewWrap { display:flex; gap:12px; align-items:flex-start; }
+  #previewCanvasWrap { border:1px solid #e6eef7; background:white; padding:6px; border-radius:8px; }
+  #previewCanvas { width:600px; height:auto; display:block; background:#fff; }
+
+  pre { background:#f0f4f8; padding:8px; border-radius:6px; font-size:0.9rem; }
+  /* Preset thumbnails */
+  .preset-list { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+  .preset-btn { position:relative; width:72px; height:56px; border:1px solid #e6eef7; border-radius:8px; overflow:hidden; padding:4px; background:white; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .preset-btn.active { outline:2px solid var(--accent); }
+  .preset-thumb { width:100%; height:100%; display:block; object-fit:cover; }
+
+  /* badge for user-saved presets */
+  .user-badge { position:absolute; top:6px; right:6px; background:var(--accent); color:#fff; font-size:10px; line-height:1; padding:3px 6px; border-radius:999px; box-shadow:0 1px 0 rgba(0,0,0,0.06); pointer-events:none; }
+  .user-delete { position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,0.6); color:#fff; font-size:12px; width:18px; height:18px; display:flex; align-items:center; justify-content:center; border-radius:50%; cursor:pointer; }
+  .user-delete:hover { background:rgba(0,0,0,0.8); }
+
+  /* danger buttons */
+  .danger { background:#fff0f0; border-color:#ffb5b5; color:#7a0b0b; }
+
+  /* toast notifications */
+  .toast-container { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:9999; }
+  .toast { background:rgba(20,20,30,0.96); color:#fff; padding:10px 12px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.16); font-size:0.95rem; display:flex; gap:8px; align-items:center; }
+  .toast button { background:transparent; border:1px solid rgba(255,255,255,0.12); color:#fff; padding:6px 8px; border-radius:6px; cursor:pointer; }
+
+  /* button helpers */
+  .btn { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; border:1px solid #c9ced6; background:white; cursor:pointer; }
+  .btn:hover { filter:brightness(.98); }
+  .btn.btn-icon svg { width:16px; height:16px; display:block; }
+
+  /* danger hover styling */
+  .danger:hover { background:#ffebeb; border-color:#ff7b7b; color:#7a0b0b; }
+
+  /* Sample overview styles */
+  #sampleOverview { max-height:280px; overflow-y:auto; }
+  #sampleOverview .sample-group { margin-bottom:12px; }
+  #sampleOverview .sample-group-title { font-weight:600; font-size:0.85rem; color:#334; margin-bottom:6px; }
+  #sampleOverview .sample-items { display:flex; gap:6px; flex-wrap:wrap; }
+  #sampleOverview .sample-item { position:relative; display:inline-flex; align-items:center; justify-content:center; width:40px; height:56px; border:1px solid #d6e0ee; background:white; border-radius:6px; transition:all 0.15s; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+  #sampleOverview .sample-item:hover { border-color:#b3c4d8; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+  #sampleOverview .sample-item svg { width:100%; height:100%; padding:3px; }
+  #sampleOverview .sample-item .user-delete { position:absolute; top:-6px; right:-6px; width:20px; height:20px; font-size:11px; background:#ef4444; }
+  #sampleOverview .sample-item .user-delete:hover { background:#dc2626; }
+  #sampleOverview .sample-item[data-current] { border:2px solid var(--accent); background:#f0f7ff; }
+
+  /* responsive: slightly smaller buttons on narrow screens */
+  @media (max-width:720px){
+    button, .btn { padding:6px 8px; font-size:0.88rem; }
+    #glyphDrawWrap { width:180px; height:270px; }
+    #previewCanvas { width:100%; }
+  }
+  /* iPad / touch-friendly tweaks ------------------------------------------------- */
+  @media (pointer:coarse){
+    :root{ --touch-target:48px; }
+    body{ padding: calc(14px + env(safe-area-inset-top)); padding-bottom: calc(14px + env(safe-area-inset-bottom)); -webkit-touch-callout: none; }
+    button, input, select, textarea, .btn { min-height:48px; min-width:48px; padding:10px 12px; font-size:1rem; }
+    .glyph-btn { min-width:44px; height:44px; }
+    .preset-btn { width:84px; height:64px; }
+    /* make scrollable lists use native momentum scrolling on iOS */
+    .glyph-grid, .preset-list, #sampleOverview, .panel { -webkit-overflow-scrolling: touch; }
+    /* increase interactive handles for touch */
+    #glyphScaleHandle, #glyphResizeHandle, #glyphMoveHandle, .lineLabel .lineGrip { width:28px; height:28px; }
+  }
+  /* responsive visibility helpers */
+  .hide-mobile { display:inline-flex; }
+  .show-mobile { display:none; }
+  @media (max-width:720px){ .hide-mobile { display:none !important; } .show-mobile { display:inline-flex !important; } }
+
+  /* collapsible debug JSON output (keeps DOM & functionality).
+    When .collapsed is present, the <pre> is hidden but the header stays visible. */
+  #glyphDebugWrap { margin-top:6px; }
+  #glyphDebugWrap .debug-header { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  #glyphDebugWrap .debug-header .small { margin:0; }
+  #glyphDebugWrap .debug-toggle { padding:6px 8px; font-size:0.9rem; border-radius:6px; border:1px solid #c9ced6; background:white; cursor:pointer; }
+  #glyphDebugWrap.collapsed pre { display:none; }
+  /* background meta debug collapse support (Tab 2) */
+  #bgMetaDebugWrap.collapsed pre { display:none; }
+  /* hide saved info under 'Zeichen eingeben' visually (keep in DOM) */
+  #savedInfo { display: none; }
+  /* hide export-related visual controls (Chaikin / RDP) but keep inputs in DOM */
+  #glyphExportControls { display: none; }
+
+  /* ink color picker styles */
+  .color-buttons { display: flex; flex-direction:column; gap: 8px; margin-top: 8px; }
+  .primary-colors { display:flex; gap:8px; }
+  .more-colors-button { display:inline-flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; border:1px solid #c9ced6; background:#fff; cursor:pointer; font-size:0.92rem; }
+  .full-color-palette { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; transition: max-height 0.18s ease; overflow:hidden; }
+  .color-btn { width: 36px; height: 36px; border-radius: 50%; border: 2px solid #ccc; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; }
+  .color-btn:hover { transform: scale(1.1); }
+  .color-btn.active { border: 3px solid #0b76ff; box-shadow: 0 0 8px rgba(11, 118, 255, 0.4); }
+
+  footer { margin-top:12px; color:var(--muted); font-size:0.9rem; }
+
+/* Editor (Tab 5) overlay styles */
+.editor-preview-wrap { border:1px solid #e6eef7; background:white; padding:6px; border-radius:8px; }
+.editor-preview-container { position:relative; width:100%; max-width:760px; height:100%; min-height:420px; background:#fff; overflow:hidden; }
+.editor-preview-container img { width:100%; height:100%; object-fit:contain; display:block; }
+.editor-overlay { position:absolute; left:0; top:0; right:0; bottom:0; pointer-events:none; }
+.editor-text-field { position:absolute; min-width:80px; min-height:30px; padding:6px 8px; background:transparent; border:1px dashed #c9ced6; color:#111; resize:none; overflow:hidden; pointer-events:auto; box-shadow:none; white-space:pre-wrap; word-wrap:break-word; }
+.editor-text-field[contenteditable] { outline:none; }
+.editor-text-field .resize-handle { position:absolute; right:2px; bottom:2px; width:10px; height:10px; background:#0b76ff; border-radius:2px; cursor:se-resize; }
+</style>
+</head>
+<body>
+
+<h1>Handschrift-Tool — Komplett</h1>
+
+<div class="tabs">
+  <div id="tabGlyph" class="tab active">1) Glyph-Editor</div>
+  <div id="tabBg" class="tab">2) Background Calibrator</div>
+  <div id="tabRender" class="tab">3) Text → Liniertes Blatt</div>
+  <div id="tabEditor" class="tab">4) Dokument-Editor (Beta)</div>
+</div>
+
+<!-- --- GLYPH SECTION (Teil 1) - Neu strukturiert --- -->
+<div id="glyphSection" class="panel">
+  <!-- Wrapper für horizontale Anordnung: Links | Mitte (Canvas) | Rechts -->
+  <div style="display:flex; gap:16px; align-items:stretch;">
+    
+    <!-- LINKE SPALTE: Zeichen-Auswahl -->
+    <div style="width:300px; display:flex; flex-direction:column; gap:12px;">
+      <label class="small">Zeichen wählen</label>
+      <div id="glyphGrid" class="glyph-grid"></div>
+
+      <div style="margin-top:8px;">
+        <label class="small">Zeichen suchen oder hinzufügen</label>
+        <div style="display:flex; gap:8px;">
+          <input id="charInput" type="text" maxlength="1" style="width:80px;">
+          <button id="setCharBtn" class="btn btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>Bestätigen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MITTLERE SPALTE: Canvas (zentriert) -->
+    <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;">
+    <!-- Über Canvas: Aktuelle Glyphe und Buttons -->
+      <div style="text-align:center; width:100%;">
+        <div class="small">Aktuelle Glyphe</div>
+        <div id="currentChar" style="font-size:1.6rem; font-weight:700;">a</div>
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button id="glyphSaveBtn" class="btn btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><path d="M17 21v-8H7v8"></path><path d="M7 3v6h10"></path></svg>Sample speichern</button>
+        <button id="glyphUndoBtn" class="btn btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>Letzter Strich</button>
+        <button id="glyphClearBtn" class="btn btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 4H8l-7 7v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="9" y2="18"/></svg>Canvas leeren</button>
+      </div>
+
+      <!-- Canvas selbst -->
+      <div id="glyphDrawWrap">
+        <!-- SVG overlay for crisp vector rendering (scaled via viewBox) -->
+        <svg id="glyphSVG" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 330" preserveAspectRatio="xMidYMid meet" style="position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; z-index:2;"></svg>
+        <canvas id="glyphCanvas" style="position:relative; z-index:1;"></canvas>
+      </div>
+
+      <!-- Unter Canvas: Canvas zurücksetzen und Samples -->
+      <div style="width:100%; text-align:center;">
+        <button style="margin:0 0 8px 0; background:#fff; border:1px solid #c9ced6; border-radius:6px; font-size:0.85rem; padding:4px 10px; cursor:pointer;" id="glyphCanvasResetBtn">Canvas zurücksetzen</button>
+        <div class="small" style="margin-bottom:8px;">Gespeicherte Samples (<span id="sampleCount">0</span>)</div>
+        <div id="sampleOverview" style="background:#f9f9fb; border:1px solid #e2e8f0; border-radius:8px; padding:8px; min-height:56px; display:flex; justify-content:center; align-items:center; flex-wrap:wrap;"></div>
+      </div>
+    </div>
+
+    <!-- RECHTE SPALTE: Samples -->
+    <div style="width:320px; display:flex; flex-direction:column; gap:12px; overflow-y:auto; max-height:800px;">
+      <label class="small">Samples</label>
+
+      <!-- Letztes Sample löschen (Button kann entfernt werden) -->
+      <!-- ENTFERNT: deleteGlyphBtn wird nicht mehr angezeigt -->
+
+      <!-- Alle "a" samples löschen -->
+      <button id="deleteAllForCharBtn" class="btn btn-icon" title="Alle gespeicherten Samples dieses Zeichens löschen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg><span class="btn-label">alle "a" samples löschen</span></button>
+
+      <!-- Samples von allen Buchstaben löschen -->
+      <button id="glyphClearAllBtn" class="btn danger btn-icon" title="Samples von allen Buchstaben löschen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M9 6V4h6v2"/></svg>Samples von allen Buchstaben löschen</button>
+
+      <!-- Glyph Sets (speichern / laden) -->
+      <label class="small" style="margin-top:12px;">Glyph Sets (speichern / laden)</label>
+      
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="glyphSetNameInput" type="text" placeholder="Set-Name (optional)" style="flex:1;">
+        <button id="glyphSetSaveBtn">Set speichern</button>
+      </div>
+
+      <div style="margin-top:6px;">
+        <select id="glyphSetSelect" style="width:100%;"></select>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button id="glyphSetLoadBtn" style="flex:1;">Set laden</button>
+        <button id="glyphSetDeleteBtn" style="flex:1;">Set löschen</button>
+      </div>
+
+      <div id="savedInfo" style="margin-top:8px; color:#234; font-size:0.85rem;"></div>
+    </div>
+  </div>
+
+    <!-- GANZ UNTEN: JSON -->
+  <div style="margin-top:16px; padding-top:12px; border-top:1px solid #e2e8f0;">
+    <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+      <!-- (Stiftdicke-Steuerelement entfernt) -->
+    </div>
+
+    <!-- JSON des letzten Samples -->
+    <div id="glyphDebugWrap" style="margin-top:12px;">
+      <div class="debug-header">
+        <label class="small">Letztes Sample (JSON)</label>
+        <button id="glyphDebugToggle" class="debug-toggle" type="button" aria-expanded="true">Ausblenden</button>
+      </div>
+      <pre id="glyphDebug">{}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- --- BACKGROUND SECTION (Teil 2) --- -->
+<div id="bgSection" class="panel" style="display:none;">
+  <div style="display:flex; gap:12px;">
+    <div style="width:320px;">
+      <label class="small">Voreinstellungen</label>
+      <div id="bgPresets" class="preset-list"></div>
+      <div style="margin-top:6px; display:none; gap:8px; align-items:center;">
+        <button id="bgPresetsReload" type="button">Voreinstellungen neu laden</button>
+        <div id="bgPresetsHint" style="color:#556;font-size:0.9rem;">(wenn nichts sichtbar ist: neu laden)</div>
+      </div>
+
+      <label class="small" style="margin-top:10px;">1) Bild/PDF hochladen</label>
+      <input id="bgFileInput" type="file" accept="image/*,application/pdf">
+
+      <div style="margin-top:8px;">
+        <label class="small">Name für Hintergrund</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+        <input id="bgNameInput" type="text" placeholder="Name (optional)" style="flex:1">
+        <button id="bgSaveBtn">Speichern</button>
+        </div>
+
+    <!-- Die alte "Gespeicherte Hintergründe" Auswahl wird ausgeblendet.
+       Gespeicherte Hintergründe erscheinen jetzt in den Voreinstellungen (Presets). -->
+    <div style="margin-top:8px; display:none;">
+    <label class="small">Gespeicherte Hintergründe</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <select id="bgSavedSelect" style="flex:1"></select>
+      <button id="bgLoadSavedBtn">Laden</button>
+      <button id="bgDeleteSavedBtn">Löschen</button>
+    </div>
+    </div>
+      </div>
+
+      <div class="small" style="color:#556; margin-top:6px;">JPG, PNG, SVG (Bild), PDF (erste Seite wird gerendert)</div>
+
+      <div style="margin-top:10px;"><label class="small">2) Linien markieren</label>
+        <div class="small" style="color:#334;">Ziehe die 3 Labels (A = oberste, B = zweite, C = letzte sichtbare Linie)</div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div style="display:flex; gap:8px;">
+          <!-- optional controls could go here -->
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="meta">LineSpacing: <span id="bgLineSpacing">—</span></div>
+        <div class="meta">Zeilen / Seite: <span id="bgLinesPerPage">—</span></div>
+        <div class="meta">Zeilenverschiebung: <span id="bgLineShift">—</span></div>
+      </div>
+
+      <div style="margin-top:8px;">
+        <div style="margin-top:10px;">
+          <!-- Beispieltext ist jetzt versteckt, wird aber im Hintergrund gespeichert -->
+          <textarea id="bgPreviewText" rows="3" style="width:100%; display:none;" placeholder="Beispieltext für Vorschau..." readonly>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</textarea>
+          <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
+            <label style="display:flex; align-items:center; gap:8px; margin:0; cursor:pointer; user-select:none;">
+              <input id="bgPreviewToggle" type="checkbox" style="width:16px; height:16px; cursor:pointer;">
+              <span class="small" style="margin:0;">Beispieltext zeigen</span>
+            </label>
+          </div>
+        </div>
+        <div id="bgMetaDebugWrap">
+          <div class="debug-header">
+            <label class="small">Letzte Metadaten</label>
+            <button id="bgMetaDebugToggle" class="debug-toggle" type="button" aria-expanded="true">Ausblenden</button>
+          </div>
+          <pre id="bgMetaDebug">{}</pre>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex:1;">
+      <label class="small">Vorschau & Labels</label>
+          <div id="bgCanvasWrap">
+        <div style="position:relative; width:100%; max-width:760px;">
+          <canvas id="bgCanvas"></canvas>
+          <div id="bgLabelA" class="lineLabel"><span class="lineGrip" aria-hidden="true">≡</span>A (oben)</div>
+          <div id="bgLabelB" class="lineLabel"><span class="lineGrip" aria-hidden="true">≡</span>B (zweite)</div>
+          <div id="bgLabelC" class="lineLabel"><span class="lineGrip" aria-hidden="true">≡</span>C (letzte)</div>
+          <div id="bgLabelD" class="lineLabel vertical"><span class="lineGrip" aria-hidden="true">≡</span><span>D (l)</span></div>
+          <div id="bgLabelE" class="lineLabel vertical"><span class="lineGrip" aria-hidden="true">≡</span><span>E (r)</span></div>
+        </div>
+      </div>
+      <div class="small" style="margin-top:8px;color:#556;">Ziehe die Labels mit Maus oder Finger. Positionen werden normalisiert.</div>
+    </div>
+  </div>
+  <div id="lineDEPanel" style="margin-top:12px; padding:12px; background:#f9fafb; border:1px solid #e6eef7; border-radius:8px;">
+    <label class="small" style="margin-bottom:8px; display:block;">Seitengrenzen (D und E)</label>
+    <div style="font-size:0.85rem; color:#667; margin-bottom:8px;">D (links) und E (rechts) begrenzen den Schreibbereich horizontal:</div>
+    <div id="lineDEStats" style="font-size:0.9rem; color:#334; margin-bottom:8px; font-family:monospace; white-space:pre-line;"></div>
+  </div>
+</div>
+
+<!-- --- RENDER SECTION (Teil 3, neu) --- -->
+<div id="renderSection" class="panel" style="display:none;">
+  <div style="display:flex; gap:12px;">
+    <div style="width:360px;">
+      <label class="small">Schreibfarbe</label>
+      <div id="renderColorButtonsContainer" class="color-buttons" style="margin-bottom:12px;"></div>
+
+      <label class="small">Stiftdicke</label>
+      <!-- Stiftdicke-Steuerelement -->
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        <input id="renderPenWidthRange" type="range" min="1" max="50" value="6" step="0.5" style="flex:1;">
+        <div id="renderPenWidthValue" style="min-width:36px; text-align:right; font-weight:600;">6</div>
+      </div>
+
+      <label class="small">Text eingeben oder Datei hochladen</label>
+      <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+        <button id="toggleFileInputBtn" class="btn">Datei hochladen</button>
+        <input id="renderFileInput" type="file" accept=".pdf,.docx,.txt" style="display:none;">
+        <button id="clearInputTextBtn" class="btn" title="Alle Eingabetext entfernen">Eingabe löschen</button>
+      </div>
+      <textarea id="inputText" rows="12" style="width:100%;"></textarea>
+
+      <!-- Margin-Einstellungen entfernt - D/E Linien definieren die Ränder automatisch -->
+
+      <div style="margin-top:10px;">
+        <div style="display:flex; gap:8px;">
+          <button id="renderNowBtn">Rendern (vorkalkulieren)</button>
+          <button id="downloadPdfBtn">Herunterladen (PDF)</button>
+          <button id="renderPrintBtn">Drucken</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <label class="small">Seiten-Vorschau</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="prevPageBtn">&larr; Vorherige</button>
+          <div>Seite <span id="currentPageIndex">1</span> / <span id="totalPages">1</span></div>
+          <button id="nextPageBtn">Nächste &rarr;</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <label class="small">Debug / Hinweise</label>
+        <pre id="renderDebug">—</pre>
+      </div>
+
+    </div>
+
+    <div style="flex:1;">
+      <label class="small">Live Vorschau</label>
+      <div id="previewCanvasWrap" class="panel">
+        <canvas id="previewCanvas"></canvas>
+      </div>
+      <div style="margin-top:8px;color:#556;" class="small">Die Vorschau skaliert Seite für das Web. PDF-Download rendert in Originalauflösung (hochqualitativ).</div>
+    </div>
+  </div>
+  </div>
+  
+  <!-- --- EDITOR SECTION (Teil 5) --- -->
+  <div id="editorSection" class="panel" style="display:none;">
+    <div style="display:flex; gap:12px;">
+      <div style="width:320px;">
+        <label class="small">Hintergrund verwenden</label>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <input id="editorBgFileInput" type="file" accept="image/*,application/pdf" style="margin-left:6px;">
+        </div>
+        <!-- Font size numeric control -->
+        <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+          <label class="small" style="margin:0; min-width:80px;">Textgröße (px)</label>
+          <input id="editorFontSizeInput" type="number" min="1" max="256" value="12" step="1" style="width:80px;">
+        </div>
+        <!-- Background page navigation -->
+        <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+          <button id="editorPagePrev" class="btn" type="button">&larr;</button>
+          <div id="editorPageIndicator" style="min-width:80px; text-align:center;">Seite 0 / 0</div>
+          <button id="editorPageNext" class="btn" type="button">&rarr;</button>
+        </div>
+
+        <div style="margin-top:6px;">
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="editorAddFieldBtn">Textfeld hinzufügen</button>
+            <button id="editorClearFieldsBtn" class="btn danger">Alle Felder löschen</button>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="small">Felder</label>
+          <div id="editorFieldsList" style="margin-top:6px; display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+      </div>
+
+      <div style="flex:1;">
+        <label class="small">Vorschau</label>
+        <div id="editorPreviewWrap" class="editor-preview-wrap">
+          <div id="editorPreviewContainer" class="editor-preview-container">
+            <img id="editorBgImg" src="" alt="Hintergrund" />
+            <canvas id="editorGlyphCanvas" style="position:absolute; left:0; top:0; pointer-events:none;"></canvas>
+            <div id="editorOverlay" class="editor-overlay"></div>
+          </div>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          <button id="editorExportPngBtn" class="btn">Als PNG exportieren</button>
+          <button id="editorPrintBtn" class="btn">Drucken</button>
+        </div>
+        <div style="margin-top:8px;color:#556;" class="small">Ziehe die Textfelder, um Position und Größe zu ändern. Doppelklick zum Bearbeiten.</div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+<script>
+/* ========== Tabs ========== */
+document.getElementById('tabGlyph').addEventListener('click', ()=> { showTab('glyph'); });
+document.getElementById('tabBg').addEventListener('click', ()=> { showTab('bg'); });
+document.getElementById('tabRender').addEventListener('click', ()=> { showTab('render'); });
+document.getElementById('tabEditor') && document.getElementById('tabEditor').addEventListener('click', ()=> { showTab('editor'); });
+
+function showTab(name){
+  document.getElementById('tabGlyph').classList.toggle('active', name==='glyph');
+  document.getElementById('tabBg').classList.toggle('active', name==='bg');
+  document.getElementById('tabRender').classList.toggle('active', name==='render');
+  document.getElementById('tabEditor') && document.getElementById('tabEditor').classList.toggle('active', name==='editor');
+  document.getElementById('glyphSection').style.display = (name==='glyph' ? '' : 'none');
+  document.getElementById('bgSection').style.display = (name==='bg' ? '' : 'none');
+  document.getElementById('renderSection').style.display = (name==='render' ? '' : 'none');
+  document.getElementById('editorSection') && (document.getElementById('editorSection').style.display = (name==='editor' ? '' : 'none'));
+}
+showTab('glyph'); // default
+
+/* Small helper: detect iOS / iPadOS so we can apply download fallbacks where
+   FileSaver / automatic downloads are blocked (Safari on iPad often prevents
+   direct blob downloads). Returns true for iPad/iPhone/iPod and macOS with
+   touch-capable (modern iPadOS may report MacIntel). */
+function isIOS(){
+  try{
+    const ua = navigator.userAgent || navigator.vendor || window.opera || '';
+    const platform = navigator.platform || '';
+    if(/iPad|iPhone|iPod/.test(ua)) return true;
+    // iPadOS 13+ may report MacIntel but has touch support
+    if(platform === 'MacIntel' && navigator.maxTouchPoints && navigator.maxTouchPoints > 1) return true;
+    return false;
+  }catch(e){ return false; }
+}
+
+/* ============================================================
+   Part 1: Glyph Editor (same behavior as before)
+   - single-sample per glyph stored in localStorage "handwriting_single_sample_v1"
+   ============================================================ */
+(function GlyphModule(){
+  const storageKey = "handwriting_single_sample_v1";
+  const storageKeySets = "handwriting_glyphsets_v1";
+  const glyphGridEl = document.getElementById("glyphGrid");
+  const currentCharEl = document.getElementById("currentChar");
+  const sampleCountEl = document.getElementById("sampleCount");
+  const savedInfoEl = document.getElementById("savedInfo");
+  const glyphDebug = document.getElementById("glyphDebug");
+  const charInput = document.getElementById("charInput");
+  const setCharBtn = document.getElementById("setCharBtn");
+  const glyphSaveBtn = document.getElementById("glyphSaveBtn");
+  const glyphUndoBtn = document.getElementById("glyphUndoBtn");
+  const glyphClearBtn = document.getElementById("glyphClearBtn");
+  const glyphCanvas = document.getElementById("glyphCanvas");
+  const gctx = glyphCanvas.getContext("2d");
+  const glyphWrapper = document.getElementById("glyphDrawWrap");
+  const glyphs = "abcdefghijklmnopqrstuvwxyzäöüßABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ0123456789.,?!:;-_()\"'".split("");
+
+  // ink colors: realistic writing colors (extended palette)
+  const inkColors = [
+    { name: 'Schwarz', hex: '#000000' },
+    { name: 'Dunkelblau', hex: '#1a3a52' },
+    { name: 'Hellblau', hex: '#4a7ba7' },
+    { name: 'Royalblau', hex: '#4169e1' },
+    { name: 'Himmelblau', hex: '#87ceeb' },
+    { name: 'Dunkelrot', hex: '#8b2e2e' },
+    { name: 'Rot', hex: '#dc143c' },
+    { name: 'Karminrot', hex: '#c41e3a' },
+    { name: 'Dunkelgrün', hex: '#2d5016' },
+    { name: 'Grün', hex: '#228b22' },
+    { name: 'Olivgrün', hex: '#6b8e23' },
+    { name: 'Dunkelbraun', hex: '#3e2723' },
+    { name: 'Braun', hex: '#654321' },
+    { name: 'Hellbraun', hex: '#8b6f47' },
+    { name: 'Grau', hex: '#4a4a4a' },
+    { name: 'Hellgrau', hex: '#808080' },
+    { name: 'Silbergrau', hex: '#a9a9a9' },
+    { name: 'Dunkelviolett', hex: '#4a148c' },
+    { name: 'Violett', hex: '#8b008b' },
+    { name: 'Flieder', hex: '#c8a2c8' },
+    { name: 'Indigo', hex: '#4b0082' },
+    { name: 'Orange', hex: '#ff8c00' },
+    { name: 'Dunkelorange', hex: '#d2691e' },
+    { name: 'Rostrot', hex: '#b7410e' },
+    { name: 'Teal', hex: '#008080' },
+    { name: 'Dunkelcyan', hex: '#008b8b' },
+    { name: 'Marineblau', hex: '#000080' },
+    { name: 'Schieferschwarz', hex: '#2f4f4f' },
+  ];
+
+  let collection = {}; // stored glyphs
+  let currentChar = "a";
+  let strokes = [];
+  let currentStroke = null;
+  // selected sample index per character (so clicked sample stays highlighted)
+  let selectedSampleIndex = {};
+  let drawing = false;
+  // scale applied to the glyph rendering (1 = original size)
+  let glyphScale = 1;
+  let glyphOffset = { x: 0, y: 0 };
+  let currentInkColor = '#000000'; // default black
+  // Stiftdicke (px bei pressure=1). Default 6 to keep previous appearance similar.
+  let penWidth = 6;
+
+  // Hilfsfunktion: prüft, ob für ein Glyph Samples existieren
+  function hasSamplesForGlyph(ch) {
+    return collection[ch] && Array.isArray(collection[ch]) && collection[ch].length > 0;
+  }
+
+  // init load
+  function loadCollection(){ try { const raw = localStorage.getItem(storageKey); if(raw) collection = JSON.parse(raw); } catch(e){} }
+  function saveCollection(){ try { localStorage.setItem(storageKey, JSON.stringify(collection)); } catch(e){} }
+  // glyph sets collection (user-saved named collections)
+  let glyphSets = {};
+  function loadGlyphSetsFromStorage(){ try{ const raw = localStorage.getItem(storageKeySets); glyphSets = raw ? JSON.parse(raw) : {}; }catch(e){ glyphSets = {}; } populateGlyphSetSelect(); }
+  function saveGlyphSetsToStorage(){ try{ localStorage.setItem(storageKeySets, JSON.stringify(glyphSets)); }catch(e){} populateGlyphSetSelect(); }
+  function populateGlyphSetSelect(){ const sel = document.getElementById('glyphSetSelect'); if(!sel) return; sel.innerHTML=''; const empty = document.createElement('option'); empty.value=''; empty.textContent='-- Kein Set gewählt --'; sel.appendChild(empty); const keys = Object.keys(glyphSets).sort((a,b)=> (glyphSets[b].createdAt||'') > (glyphSets[a].createdAt||'') ? 1 : -1); for(const id of keys){ const it=glyphSets[id]; const opt=document.createElement('option'); opt.value=id; opt.textContent=`${it.name||'(unnamed)'} — ${new Date(it.createdAt).toLocaleString()}`; sel.appendChild(opt); } }
+  // migrate older single-sample format to array format
+  function normalizeCollection(){
+    for(const k of Object.keys(collection)){
+      const v = collection[k];
+      if(!v) continue;
+      // if it's a single sample object (has strokes) convert to array
+      if(!Array.isArray(v) && typeof v === 'object' && v.strokes){ collection[k] = [v]; }
+    }
+  }
+
+  // canvas sizing
+  function sizeCanvas(){
+    const w = glyphWrapper.clientWidth;
+    const h = glyphWrapper.clientHeight;
+    glyphCanvas.style.width = w + "px";
+    glyphCanvas.style.height = h + "px";
+    glyphCanvas.width = Math.round(w * devicePixelRatio);
+    glyphCanvas.height = Math.round(h * devicePixelRatio);
+    // base transform maps CSS pixels -> device pixels
+    gctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    redraw();
+  }
+  window.addEventListener('resize', sizeCanvas);
+  setTimeout(sizeCanvas, 20);
+
+  function guides(){ const h = glyphCanvas.height / devicePixelRatio; return { xHeight: h*(1/3), baseline: h*(2/3), canvasW: glyphCanvas.width/devicePixelRatio, canvasH: h }; }
+  function drawGuides(){ const g = guides(); gctx.fillStyle="#fff"; gctx.fillRect(0,0,g.canvasW,g.canvasH); gctx.strokeStyle="#e8eef6"; gctx.lineWidth=1; [g.xHeight,g.baseline].forEach(y=>{ gctx.beginPath(); gctx.moveTo(0,y+0.5); gctx.lineTo(g.canvasW,y+0.5); gctx.stroke(); }); }
+  function drawStroke(points){
+    if(!points || points.length===0) return;
+    if(points.length===1){ gctx.beginPath(); gctx.arc(points[0].x, points[0].y, 1.5, 0, Math.PI*2); gctx.fillStyle=currentInkColor; gctx.fill(); return; }
+    gctx.beginPath(); gctx.moveTo(points[0].x, points[0].y);
+    for(let i=1;i<points.length;i++){ const prev=points[i-1], cur=points[i]; const mx=(prev.x+cur.x)/2, my=(prev.y+cur.y)/2; gctx.quadraticCurveTo(prev.x, prev.y, mx, my); }
+    const avgP = points.reduce((s,p)=>s+p.p,0)/points.length;
+    // use configurable penWidth and pressure
+    gctx.lineWidth = Math.max(0.3, penWidth * Math.max(0.12, avgP));
+    gctx.strokeStyle=currentInkColor; gctx.lineCap="round"; gctx.lineJoin="round"; gctx.stroke();
+  }
+  function redraw(){
+    // ensure base transform (devicePixelRatio) is set
+    gctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    // clear full CSS-sized canvas
+    const w = glyphCanvas.width / devicePixelRatio;
+    const h = glyphCanvas.height / devicePixelRatio;
+    gctx.clearRect(0,0,w,h);
+
+    // draw guides unscaled (always aligned to canvas)
+    drawGuides();
+
+    // draw strokes scaled around baseline (so glyph aligns to lines)
+    const g = guides();
+    const baselineY = g.baseline; // pivot Y in CSS pixels
+    const pivotX = w/2;
+
+    // transform function: scale around (pivotX, baselineY) then translate by glyphOffset
+    function transformPoint(pt){
+      const sx = pivotX + glyphScale * (pt.x - pivotX) + glyphOffset.x;
+      const sy = baselineY + glyphScale * (pt.y - baselineY) + glyphOffset.y;
+      return { x: sx, y: sy, p: pt.p, t: pt.t };
+    }
+
+    // draw transformed strokes (guides remain unscaled)
+    gctx.save();
+    for(const s of strokes){ const t = s.map(transformPoint); drawStroke(t); }
+    if(currentStroke){ const tc = currentStroke.map(transformPoint); drawStroke(tc); }
+    gctx.restore();
+    // Update SVG overlay for crisp scalable rendering
+    try{ updateGlyphSVG(); }catch(e){ /* ignore if SVG missing */ }
+  }
+
+  // Update the SVG overlay with current strokes (vector paths in canonical viewBox coords)
+  function updateGlyphSVG(){
+    const svgEl = document.getElementById('glyphSVG');
+    if(!svgEl) return;
+    // canonical viewBox size (matches the SVG viewBox attribute)
+    const defaultW = 220, defaultH = 330;
+    const wrapperW = glyphWrapper.offsetWidth || defaultW;
+    const wrapperH = glyphWrapper.offsetHeight || defaultH;
+    const normX = defaultW / Math.max(1, wrapperW);
+    const normY = defaultH / Math.max(1, wrapperH);
+
+    const pivotX = defaultW/2;
+    const pivotY = defaultH*(2/3);
+    const offsetXNorm = (glyphOffset && glyphOffset.x) ? glyphOffset.x * normX : 0;
+    const offsetYNorm = (glyphOffset && glyphOffset.y) ? glyphOffset.y * normY : 0;
+    const groupTransform = `translate(${offsetXNorm.toFixed(2)},${offsetYNorm.toFixed(2)}) translate(${pivotX.toFixed(2)},${pivotY.toFixed(2)}) scale(${glyphScale}) translate(${(-pivotX).toFixed(2)},${(-pivotY).toFixed(2)})`;
+
+    // build SVG content
+    let inner = `<g transform="${groupTransform}" fill="none" stroke="${currentInkColor}" stroke-linecap="round" stroke-linejoin="round">`;
+    const all = strokes.slice();
+    if(currentStroke) all.push(currentStroke);
+    for(const s of all){
+      if(!s || s.length===0) continue;
+      // convert points to canonical viewBox coords
+      const pts = s.map(p => ({ x: (p.x * normX), y: (p.y * normY), p: p.p || 0.5, sw: (typeof p.sw === 'number' ? p.sw : undefined) }));
+  if(pts.length===1){ const p = pts[0]; const fixedBase = 6; const r = Math.max(0.5, ((fixedBase) * (p.p||0.5)/4)); inner += `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${p.color||currentInkColor}"/>`; continue; }
+      const avgP = pts.reduce((a,p)=>a+p.p,0)/pts.length;
+      const sw = Math.max(0.3, penWidth * Math.max(0.12, avgP));
+      const d = pathFromPoints(pts);
+      inner += `<path d="${d}" stroke-width="${sw.toFixed(2)}" />`;
+    }
+    inner += `</g>`;
+    svgEl.innerHTML = inner;
+  }
+
+    // ---- sichere Pt-Funktion mit Clamping ----
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  function ptFromEvent(e){
+    const rect = glyphCanvas.getBoundingClientRect();
+    // raw coords relative to canvas element
+    let x = e.clientX - rect.left;
+    let y = e.clientY - rect.top;
+    // if glyphScale != 1 or there is an offset we rendered transformed strokes.
+    // invert translation first (displayed = scaled(orig) + offset), then invert pivot-scale
+    if((glyphOffset && (glyphOffset.x !== 0 || glyphOffset.y !== 0)) || (glyphScale && Math.abs(glyphScale - 1) > 0.00001)){
+      // subtract the visual offset (in CSS pixels)
+      x = x - glyphOffset.x;
+      y = y - glyphOffset.y;
+      const cx = rect.width/2;
+      const g = guides();
+      const baselineY = g.baseline;
+      // inverse of: displayed = pivot + s*(orig - pivot) + offset
+      x = cx + (x - cx) / glyphScale;
+      y = baselineY + (y - baselineY) / glyphScale;
+    }
+    // clamp to [0, width/height]
+    x = clamp(x, 0, rect.width);
+    y = clamp(y, 0, rect.height);
+    const p = (typeof e.pressure === 'number') ? e.pressure : (e.pointerType === 'mouse' ? 0.5 : 0.5);
+    const t = performance.now();
+    return { x, y, p, t };
+  }
+
+  // pointerdown: nur starten wenn inside
+  glyphCanvas.addEventListener("pointerdown", e=>{
+    e.preventDefault();
+    const rect = glyphCanvas.getBoundingClientRect();
+    const cx = e.clientX, cy = e.clientY;
+    if (cx < rect.left || cx > rect.right || cy < rect.top || cy > rect.bottom) {
+        // außerhalb -> nichts tun
+        return;
+    }
+    glyphCanvas.setPointerCapture(e.pointerId);
+    drawing = true;
+    currentStroke = [];
+    currentStroke.push(ptFromEvent(e));
+    redraw();
+  });
+
+    // pointermove: clamp beim Hinzufügen
+  glyphCanvas.addEventListener("pointermove", e=>{
+    if (!drawing) return;
+    // falls pointer außerhalb: wir clampen die Punkte automatisch
+    currentStroke.push(ptFromEvent(e));
+    redraw();
+  });
+
+    // Ende-Handler: ebenfalls clampen bevor push
+  function endGlyphPointer(e){
+    if (!drawing) return;
+    drawing = false;
+    // falls noch ein aktueller pointer-event übergeben wurde, clampen und pushen
+    if (e) {
+        currentStroke.push(ptFromEvent(e));
+    }
+    if (currentStroke && currentStroke.length > 0) {
+      // stamp a fixed stroke width into each point (constant legacy default)
+      for(const p of currentStroke){ p.sw = 6; p.color = currentInkColor; }
+      strokes.push(currentStroke);
+    }
+    currentStroke = null;
+    redraw();
+  }
+  glyphCanvas.addEventListener("pointerup", endGlyphPointer);
+  glyphCanvas.addEventListener("pointercancel", endGlyphPointer);
+  glyphCanvas.addEventListener("pointerleave", endGlyphPointer);
+  glyphCanvas.addEventListener("pointerout", endGlyphPointer);
+
+
+  function computeBBox(arr){ const xs=[], ys=[]; for(const s of arr) for(const p of s){ xs.push(p.x); ys.push(p.y); } if(xs.length===0) return null; return { xMin: Math.min(...xs), xMax: Math.max(...xs), yMin: Math.min(...ys), yMax: Math.max(...ys) }; }
+  function computeMetrics(bbox,g){ if(!bbox) return null; const width=bbox.xMax-bbox.xMin, height=bbox.yMax-bbox.yMin; const ascender=Math.max(0, g.xHeight - bbox.yMin); const descender=Math.max(0, bbox.yMax - g.baseline); return { width, height, ascender, descender }; }
+
+  function chaikin(points, iter=1){ if(iter<=0) return points.slice(); let res = points.map(p=>({x:p.x,y:p.y,p:p.p,t:p.t, sw: (typeof p.sw === 'number' ? p.sw : undefined), color: p.color || undefined})); for(let k=0;k<iter;k++){ const tmp=[res[0]]; for(let i=0;i<res.length-1;i++){ const a=res[i], b=res[i+1]; tmp.push({x:0.75*a.x+0.25*b.x,y:0.75*a.y+0.25*b.y,p:0.75*a.p+0.25*b.p,t:a.t, sw: (typeof a.sw === 'number' && typeof b.sw === 'number' ? (0.75*a.sw+0.25*b.sw) : (typeof a.sw === 'number' ? a.sw : (typeof b.sw === 'number' ? b.sw : undefined))), color: a.color || b.color || undefined}); tmp.push({x:0.25*a.x+0.75*b.x,y:0.25*a.y+0.75*b.y,p:0.25*a.p+0.75*b.p,t:b.t, sw: (typeof a.sw === 'number' && typeof b.sw === 'number' ? (0.25*a.sw+0.75*b.sw) : (typeof a.sw === 'number' ? a.sw : (typeof b.sw === 'number' ? b.sw : undefined))), color: a.color || b.color || undefined}); } tmp.push(res[res.length-1]); res=tmp; } return res; }
+  function rdp(points, eps){ if(!eps||eps<=0) return points.slice(); function sqDist(a,b){const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy;} function sqSegDist(p,a,b){ let x=a.x,y=a.y,dx=b.x-x,dy=b.y-y; if(dx!==0||dy!==0){ const t=((p.x-x)*dx+(p.y-y)*dy)/(dx*dx+dy*dy); if(t>1){x=b.x;y=b.y;} else if(t>0){x+=dx*t;y+=dy*t;} } return sqDist(p,{x,y}); } if(points.length<3) return points.slice(); const out=[points[0]]; function recurse(first,last){ let maxd=eps*eps, idx=-1; for(let i=first+1;i<last;i++){ const d=sqSegDist(points[i], points[first], points[last]); if(d>maxd){ idx=i; maxd=d; } } if(idx>-1){ recurse(first, idx); out.push(points[idx]); recurse(idx, last); } } recurse(0, points.length-1); out.push(points[points.length-1]); return out; }
+
+  function pathFromPoints(points){ if(!points||points.length===0) return ""; let d=`M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)} `; for(let i=1;i<points.length;i++){ const a=points[i-1], b=points[i]; const mx=((a.x+b.x)/2).toFixed(2), my=((a.y+b.y)/2).toFixed(2); d += `Q ${a.x.toFixed(2)} ${a.y.toFixed(2)} ${mx} ${my} `; } return d; }
+  function strokesToSVG(strokesArr, width, height, smoothingIter=1, eps=0, strokeColor='#000'){
+    const g = { xHeight: height*(1/3), baseline: height*(2/3) };
+    let svg = `<?xml version="1.0" encoding="utf-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n`;
+    svg += `<rect width="100%" height="100%" fill="white"/>\n`;
+    svg += `<g stroke="#e8eef6" stroke-width="1" fill="none"><path d="M0 ${g.xHeight} L ${width} ${g.xHeight}"/><path d="M0 ${g.baseline} L ${width} ${g.baseline}"/></g>\n`;
+    svg += `<g fill="none" stroke="${strokeColor}" stroke-linecap="round" stroke-linejoin="round">\n`;
+    for(const s of strokesArr){
+      let pts = s;
+      if (eps && eps>0) pts = rdp(pts, eps);
+      if (smoothingIter && smoothingIter>0) pts = chaikin(pts, smoothingIter);
+      if (!pts || pts.length<1) continue;
+      if (pts.length===1) {
+        const p=pts[0]; svg+=`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="1.5" fill="${strokeColor}"/>`;
+      } else {
+        const avgP=pts.reduce((a,p)=>a+p.p,0)/pts.length; const sw=Math.max(0.3, penWidth * Math.max(0.12, avgP)); const d=pathFromPoints(pts);
+        svg+=`<path d="${d}" stroke-width="${sw.toFixed(2)}" />\n`;
+      }
+    }
+    svg += `</g></svg>`; return svg;
+  }
+
+  function buildGrid(){
+    glyphGridEl.innerHTML="";
+    for(const g of glyphs){
+      const b=document.createElement('button');
+      b.className='glyph-btn';
+      b.type='button';
+      b.textContent=g;
+      b.addEventListener('click',()=>setCurrentChar(g));
+      // grüne Umrandung, wenn Sample vorhanden
+      if(hasSamplesForGlyph(g)) {
+        b.style.border = '2px solid #22c55e'; // grün
+      }
+      glyphGridEl.appendChild(b);
+    }
+    buildColorButtons(); // initialize color button UI
+    updateUI();
+  }
+
+  function buildColorButtons(){
+    const container = document.getElementById('colorButtonsContainer');
+    if(!container) return;
+    container.innerHTML = '';
+
+    // primary colors (compact)
+    const primaryColors = [
+      { name: 'Schwarz', hex: '#000000' },
+      { name: 'Grau', hex: '#4a4a4a' },
+      { name: 'Hellblau', hex: '#4a7ba7' },
+      { name: 'Grün', hex: '#228b22' }
+    ];
+
+    const primWrap = document.createElement('div'); primWrap.className = 'primary-colors';
+    for(const color of primaryColors){
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-btn';
+      btn.style.backgroundColor = color.hex;
+      btn.title = color.name;
+      btn.dataset.color = color.hex;
+      if(color.hex === currentInkColor) btn.classList.add('active');
+      btn.addEventListener('click', (e)=>{ e.preventDefault(); setInkColor(color.hex); });
+      primWrap.appendChild(btn);
+    }
+    container.appendChild(primWrap);
+
+    // More colors toggle
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button'; moreBtn.className = 'more-colors-button'; moreBtn.setAttribute('aria-expanded','false');
+    moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle"><path d="M12 6a2 2 0 110-4 2 2 0 010 4zM12 14a2 2 0 110-4 2 2 0 010 4zM12 22a2 2 0 110-4 2 2 0 010 4z" fill="#334"/></svg> Mehr Farben';
+    container.appendChild(moreBtn);
+
+    // full palette (initially hidden)
+    const fullWrap = document.createElement('div'); fullWrap.className = 'full-color-palette'; fullWrap.style.display = 'none';
+    // exclude primary hexes from full list to avoid duplicates
+    const primaryHexes = new Set(primaryColors.map(c=>c.hex.toLowerCase()));
+    for(const color of inkColors){
+      if(primaryHexes.has(color.hex.toLowerCase())) continue; // skip primaries
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-btn';
+      btn.style.backgroundColor = color.hex;
+      btn.title = color.name;
+      btn.dataset.color = color.hex;
+      if(color.hex === currentInkColor) btn.classList.add('active');
+      btn.addEventListener('click', (e)=>{ e.preventDefault(); setInkColor(color.hex); });
+      fullWrap.appendChild(btn);
+    }
+    container.appendChild(fullWrap);
+
+    moreBtn.addEventListener('click', ()=>{
+      const open = fullWrap.style.display !== 'none';
+      fullWrap.style.display = open ? 'none' : 'flex';
+      moreBtn.setAttribute('aria-expanded', String(!open));
+    });
+  }
+
+  function setInkColor(hexColor){
+    currentInkColor = hexColor;
+    // persist color choice
+    try{ localStorage.setItem('glyphInkColor_v1', JSON.stringify({color: hexColor})); }catch(e){}
+    // update UI
+    buildColorButtons();
+    redraw();
+  }
+
+  function updateUI(){
+    currentCharEl.textContent = currentChar;
+    const samples = collection[currentChar] || null;
+    const count = samples ? (Array.isArray(samples) ? samples.length : 1) : 0;
+    sampleCountEl.textContent = count;
+    document.querySelectorAll('.glyph-btn').forEach(b=> {
+      b.classList.toggle('active', b.textContent===currentChar);
+      // grüne Umrandung, wenn Sample vorhanden
+      if(hasSamplesForGlyph(b.textContent)) {
+        b.style.border = '2px solid #22c55e';
+      } else {
+        b.style.border = '';
+      }
+    });
+    if(samples){ const latest = Array.isArray(samples) ? samples[samples.length-1] : samples; savedInfoEl.innerHTML=`Gespeichert: ${latest.createdAt} — bbox: ${latest.boundingBox?Math.round(latest.boundingBox.xMin)+','+Math.round(latest.boundingBox.yMin)+' → '+Math.round(latest.boundingBox.xMax)+','+Math.round(latest.boundingBox.yMax):'—'}`; glyphDebug.textContent = JSON.stringify(samples,null,2);} 
+    else { savedInfoEl.innerHTML = `Kein gespeichertes Sample für '${currentChar}'`; glyphDebug.textContent="{}"; }
+    // update the label for the "delete all for char" button (visual only)
+    try{
+      const delAllLabel = document.querySelector('#deleteAllForCharBtn .btn-label');
+      if(delAllLabel) delAllLabel.textContent = `alle "${currentChar}" samples löschen`;
+      const delOneLabel = document.querySelector('#deleteGlyphBtn .btn-label');
+      if(delOneLabel) delOneLabel.textContent = `letztes sample löschen`;
+    }catch(e){}
+    // Sample-Übersicht aktualisieren
+    updateSampleOverview();
+  }
+
+  // Sample-Übersicht neben dem Sample speichern Button
+  function updateSampleOverview() {
+    let container = document.getElementById('sampleOverview');
+    if(!container) {
+      container = document.createElement('div');
+      container.id = 'sampleOverview';
+      // wird bereits im HTML platziert
+      return;
+    }
+    // Übersicht leeren
+    container.innerHTML = '';
+    
+    // Zeige nur Samples des aktuell ausgewählten Buchstabens
+    const arr = collection[currentChar] ? (Array.isArray(collection[currentChar]) ? collection[currentChar] : [collection[currentChar]]) : [];
+    
+    if(arr.length > 0) {
+      // Container für die Samples
+      const itemsContainer = document.createElement('div');
+      itemsContainer.className = 'sample-items';
+      
+      for(let i=0; i<arr.length; i++) {
+        const sample = arr[i];
+        const item = document.createElement('div');
+        item.className = 'sample-item';
+        item.title = `${currentChar} [${i+1}] ${sample.createdAt ? new Date(sample.createdAt).toLocaleString() : ''}`;
+        
+        // Markiere das aktuell ausgewählte Sample (wenn vom Nutzer angeklickt) oder fallback auf das letzte
+        let selIdx = (typeof selectedSampleIndex[currentChar] !== 'undefined') ? selectedSampleIndex[currentChar] : (arr.length - 1);
+        if(arr.length === 0) selIdx = -1;
+        if(selIdx >= arr.length) selIdx = arr.length - 1;
+        if(selIdx >= 0 && i === selIdx) {
+          item.setAttribute('data-current', 'true');
+        }
+        
+        // kleine Vorschau als SVG
+        const svg = document.createElement('div');
+        svg.innerHTML = window.__handwritingGlyphSampleSVG ? window.__handwritingGlyphSampleSVG(sample) : '';
+        item.appendChild(svg);
+
+        // klick auf Sample: zeige dieses Sample im Editor-Canvas
+        item.addEventListener('click', function(e){
+          // setze strokes auf die gespeicherten, normalized Punkte (editor coords)
+          try{
+            // sample.strokes are saved in canonical canvas coords (canvasSize)
+            const sW = (sample.canvasSize && sample.canvasSize.w) ? sample.canvasSize.w : 220;
+            const sH = (sample.canvasSize && sample.canvasSize.h) ? sample.canvasSize.h : 330;
+            const wrapperW = glyphWrapper.offsetWidth || sW;
+            const wrapperH = glyphWrapper.offsetHeight || sH;
+            const sx = wrapperW / sW;
+            const sy = wrapperH / sH;
+                strokes = (sample.strokes || []).map(st => st.map(p => ({ x: p.x * sx, y: p.y * sy, p: p.p ?? 0.5, t: p.t ?? 0, sw: (typeof p.sw === 'number' ? p.sw : undefined), color: p.color || undefined })));
+            currentStroke = null;
+            // speichere die Auswahl und markiere visuell das ausgewählte Item
+            selectedSampleIndex[currentChar] = i;
+            const parent = item.parentElement;
+            if(parent){ parent.querySelectorAll('.sample-item').forEach(it=> it.removeAttribute('data-current')); }
+            item.setAttribute('data-current','true');
+            // update UI/debug und redraw
+            updateUI(); redraw();
+          }catch(err){ console.warn('Sample click handler failed', err); }
+        });
+        
+        // kleines "x" zum Löschen oben rechts
+        const delBtn = document.createElement('span');
+        delBtn.className = 'user-delete';
+        delBtn.title = 'Sample löschen';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if(Array.isArray(collection[currentChar])) {
+            collection[currentChar].splice(i,1);
+            if(collection[currentChar].length === 0) delete collection[currentChar];
+          } else {
+            delete collection[currentChar];
+          }
+          saveCollection();
+          // ensure selected index remains valid for this char
+          try{
+            if(typeof selectedSampleIndex[currentChar] !== 'undefined'){
+              if(collection[currentChar]){
+                if(selectedSampleIndex[currentChar] >= collection[currentChar].length) selectedSampleIndex[currentChar] = collection[currentChar].length - 1;
+              } else {
+                delete selectedSampleIndex[currentChar];
+              }
+            }
+          }catch(e){}
+          updateUI();
+        });
+        item.appendChild(delBtn);
+        
+        itemsContainer.appendChild(item);
+      }
+      
+      container.appendChild(itemsContainer);
+    } else {
+      container.innerHTML = '<div class="small" style="color:#aaa; padding:8px; text-align:center;">Keine Samples für "<strong>' + currentChar + '</strong>" gespeichert</div>';
+    }
+  }
+
+  // SVG-Vorschau für Sample
+  window.__handwritingGlyphSampleSVG = function(sample) {
+    if(!sample || !sample.strokes) return '';
+    const w = sample.canvasSize && sample.canvasSize.w ? sample.canvasSize.w : 40;
+    const h = sample.canvasSize && sample.canvasSize.h ? sample.canvasSize.h : 60;
+    let svg = `<svg width="40" height="60" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+    svg += '<rect width="100%" height="100%" fill="#fff"/>';
+    svg += `<g stroke="#222" stroke-width="2" fill="none">`;
+    for(const s of sample.strokes) {
+      if(s.length === 1) {
+        svg += `<circle cx="${s[0].x}" cy="${s[0].y}" r="2" fill="#222"/>`;
+      } else {
+        svg += `<path d="M${s[0].x},${s[0].y}`;
+        for(let i=1;i<s.length;i++) {
+          const a=s[i-1],b=s[i];
+          const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+          svg += ` Q${a.x},${a.y} ${mx},${my}`;
+        }
+        svg += '"/>';
+      }
+    }
+    svg += '</g></svg>';
+    return svg;
+  };
+
+  function setCurrentChar(ch){
+    currentChar = ch; strokes=[]; currentStroke=null;
+    if(collection[ch]){
+      // show the latest saved sample for preview
+      const samples = Array.isArray(collection[ch]) ? collection[ch] : [collection[ch]];
+      const latest = samples[samples.length-1];
+      if(latest && latest.strokes) strokes = latest.strokes.map(s=>s.map(p=>({x:p.x,y:p.y,p:p.p,t:p.t, sw: (typeof p.sw === 'number' ? p.sw : undefined), color: p.color || undefined}))); 
+    }
+    updateUI(); redraw();
+  }
+
+  function saveSample(){
+    // stelle sicher, dass guides() aktuell ist
+    const g = guides(); // <-- wichtig
+    const canvasH = g.canvasH;
+    const canvasW = g.canvasW;
+
+    // strokes sollte vorhanden sein (ansonsten nichts speichern)
+    if (!strokes || strokes.length === 0) {
+        if (!confirm("Kein Strich vorhanden. Sample trotzdem speichern (leeres Glyph)?")) return;
+    }
+
+    // berechne horizontale bbox (für Breite / advance)
+    const xs = [], ys = [];
+    for (const s of strokes){
+        for (const p of s){
+        xs.push(p.x);
+        ys.push(p.y);
+        }
+    }
+
+    const xMin = xs.length ? Math.min(...xs) : 0;
+    const xMax = xs.length ? Math.max(...xs) : canvasW;
+
+    // vertikale bbox = komplette Canvas-Höhe (Benutzer bestimmt Vertikalplatzierung)
+    const bbox = {
+        xMin: xMin,
+        xMax: xMax,
+        yMin: 0,
+        yMax: canvasH
+    };
+  // Behavior required by user:
+  // - If the user resized the wrapper canvas (zoomHandle), that visual
+  //   canvas size change should NOT affect Tab 3 output.
+  // - If the user applied the glyph-scale transform (glyphScale / glyphOffset)
+  //   to alter the glyph lines, that change SHOULD be saved and affect Tab 3.
+  // Implementation strategy:
+  // 1) Normalize current stroke coordinates back to a canonical canvas size
+  //    (defaultW/defaultH) to undo any wrapper-resize scaling.
+  // 2) Apply the glyphScale and glyphOffset (converted into the canonical
+  //    coordinate system) so intentional "line" scaling is persisted.
+
+  const defaultW = 220, defaultH = 330; // canonical editor canvas size
+  const wrapperW = glyphWrapper.offsetWidth || canvasW;
+  const wrapperH = glyphWrapper.offsetHeight || canvasH;
+  const normX = defaultW / Math.max(1, wrapperW);
+  const normY = defaultH / Math.max(1, wrapperH);
+
+  // Step 1: normalize strokes to canonical coords
+  const baseStrokes = (strokes || []).map(s => s.map(p => ({ x: p.x * normX, y: p.y * normY, p: p.p ?? 0.5, t: p.t ?? 0, sw: (typeof p.sw === 'number' ? p.sw : undefined), color: p.color || undefined })));
+
+  // Step 2: apply glyphScale around canonical pivot and converted offsets
+  const pivotX = defaultW / 2;
+  const pivotY = defaultH * (2/3); // canonical baseline
+  const offsetXNorm = glyphOffset.x * normX;
+  const offsetYNorm = glyphOffset.y * normY;
+
+  function applyVisualToPoint(pt){
+    return {
+      x: pivotX + glyphScale * (pt.x - pivotX) + offsetXNorm,
+      y: pivotY + glyphScale * (pt.y - pivotY) + offsetYNorm,
+      p: pt.p, t: pt.t, sw: (typeof pt.sw === 'number' ? pt.sw : undefined), color: pt.color || undefined
+    };
+  }
+
+  const savedStrokes = baseStrokes.map(s => s.map(p => applyVisualToPoint(p)));
+
+  // recompute bounding box based on final saved strokes (in canonical coords)
+  const allXs = [], allYs = [];
+  for(const s of savedStrokes) for(const p of s){ allXs.push(p.x); allYs.push(p.y); }
+  const sXMin = allXs.length ? Math.min(...allXs) : 0;
+  const sXMax = allXs.length ? Math.max(...allXs) : defaultW;
+  const bboxScaled = { xMin: sXMin, xMax: sXMax, yMin: 0, yMax: defaultH };
+
+  const sample = {
+    strokes: savedStrokes,
+    // store canonical canvas size so renderer uses known coordinate system
+    canvasSize: { w: defaultW, h: defaultH },
+    guides: { xHeight: defaultH*(1/3), baseline: defaultH*(2/3) },
+    boundingBox: bboxScaled,
+    metrics: {
+      width: sXMax - sXMin,
+      fullHeight: defaultH
+    },
+    inkColor: currentInkColor,
+    createdAt: new Date().toISOString()
+  };
+
+    // speichern (collection & localStorage)
+  // append sample to array for this character
+  if(!collection[currentChar]) collection[currentChar] = [];
+  if(!Array.isArray(collection[currentChar])) collection[currentChar] = [collection[currentChar]];
+  collection[currentChar].push(sample);
+  saveCollection();
+
+  // Do NOT apply the visual glyphScale/glyphOffset to the in-editor stored
+  // strokes here. The strokes array already reflects any intentional wrapper
+  // resize scaling. We just reset visual transforms so the editor preview
+  // returns to neutral after saving.
+  // Update in-editor strokes so the canvas appearance remains the same after
+  // we reset visual transforms. We map the saved canonical strokes back to
+  // the current wrapper/display coordinates.
+  // clear the editor canvas after saving the sample (user requested)
+  strokes = [];
+  currentStroke = null;
+
+  glyphScale = 1;
+  glyphOffset = { x: 0, y: 0 };
+    // UI aktualisieren
+    if (typeof updateUI === 'function') updateUI();
+    if (typeof redraw === 'function') redraw();
+
+    // optional kurzes Feedback
+    console.log(`Saved sample for '${currentChar}' — width=${Math.round(sample.metrics.width)}px, canvasH=${canvasH}px`);
+    // notify other modules in same window that glyphs changed
+    try { window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail: { char: currentChar } })); } catch(e){}
+  }
+
+  function deleteSample(){
+    if(!collection[currentChar]) { showToast("Kein Sample."); return; }
+    const samples = Array.isArray(collection[currentChar]) ? collection[currentChar] : [collection[currentChar]];
+    if(samples.length>1){
+      // remove last sample immediately, offer undo
+      const backup = samples.slice();
+      samples.pop(); collection[currentChar] = samples; saveCollection(); updateUI(); redraw();
+      try { window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail: { char: currentChar, deletedLast:true } })); } catch(e){}
+      showToast(`Letztes Sample für '${currentChar}' gelöscht.`, { undoLabel: 'Rückgängig', undo: ()=>{ collection[currentChar]=backup; saveCollection(); updateUI(); redraw(); try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ char: currentChar, restored:true } })); }catch(e){} }, timeout:8000 });
+      return;
+    }
+    // single sample -> remove the entry
+    const backup = collection[currentChar];
+    delete collection[currentChar]; strokes=[]; currentStroke=null; saveCollection(); updateUI(); redraw();
+    try { window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail: { char: currentChar, deleted:true } })); } catch(e){}
+    showToast(`Sample für '${currentChar}' gelöscht.`, { undoLabel: 'Rückgängig', undo: ()=>{ collection[currentChar]=backup; saveCollection(); updateUI(); redraw(); try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ char: currentChar, restored:true } })); }catch(e){} }, timeout:8000 });
+  }
+
+  // bindings
+  // simple toast/undo utility (no confirms)
+  function ensureToastContainer(){ let c = document.getElementById('toastContainer'); if(!c){ c = document.createElement('div'); c.id='toastContainer'; c.className='toast-container'; document.body.appendChild(c); } return c; }
+  function showToast(message, opts){ // opts: { undoLabel, undo (fn), timeout }
+    const c = ensureToastContainer(); const item = document.createElement('div'); item.className='toast'; item.textContent = message;
+    if(opts && opts.undoLabel && typeof opts.undo === 'function'){
+      const btn = document.createElement('button'); btn.type='button'; btn.textContent = opts.undoLabel; btn.addEventListener('click', ()=>{ try{ opts.undo(); }catch(e){} finally{ if(item.parentElement) item.remove(); } }); item.appendChild(btn);
+    }
+    c.appendChild(item);
+    const t = (opts && opts.timeout) ? opts.timeout : 6000;
+    const to = setTimeout(()=>{ if(item.parentElement) item.remove(); }, t);
+    return { remove: ()=>{ if(item.parentElement) item.remove(); clearTimeout(to); } };
+  }
+  document.getElementById('glyphSaveBtn').addEventListener('click', saveSample);
+  document.getElementById('glyphUndoBtn').addEventListener('click', ()=>{ if(currentStroke && currentStroke.length>0) currentStroke.pop(); else if(strokes.length>0) strokes.pop(); redraw(); });
+  document.getElementById('glyphClearBtn').addEventListener('click', ()=>{ 
+    // backup strokes for undo
+    const backupStrokes = JSON.parse(JSON.stringify(strokes || []));
+    const backupCurrent = currentStroke ? JSON.parse(JSON.stringify(currentStroke)) : null;
+    // clear canvas immediately
+    strokes = [];
+    currentStroke = null;
+    redraw();
+    // show toast with undo
+    showToast('Canvas geleert.', { undoLabel: 'Rückgängig', undo: ()=>{
+      strokes = backupStrokes;
+      currentStroke = backupCurrent;
+      redraw();
+    }, timeout: 8000 });
+  });
+  document.getElementById('setCharBtn').addEventListener('click', ()=>{
+    const v = charInput.value.trim();
+    if(!v) return alert("Zeichen eingeben.");
+    const ch = v[0];
+    // Falls das Zeichen noch nicht in der glyph-Liste ist, hinzufügen
+    try{
+      if(!glyphs.includes(ch)){
+        glyphs.push(ch);
+      }
+    }catch(e){ /* ignore if glyphs isn't mutable for any reason */ }
+    // setze aktuelles Zeichen und baue Grid neu, damit das neue Zeichen sichtbar wird
+    setCurrentChar(ch);
+    buildGrid();
+    // leere das Eingabefeld
+    charInput.value = '';
+    // scrolle das neue Glyph-Button Element in View (falls vorhanden)
+    try{
+      const btn = glyphGridEl.querySelector('.glyph-btn[aria-selected]');
+      // prefer direct match by textContent
+      const found = Array.from(glyphGridEl.querySelectorAll('.glyph-btn')).find(b=>b.textContent === ch);
+      if(found) found.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }catch(e){}
+  });
+  document.getElementById('setCharBtn').addEventListener('click', ()=>{
+    const v = charInput.value.trim();
+    if(!v) return alert("Zeichen eingeben.");
+    const ch = v[0];
+    // Falls das Zeichen noch nicht in der glyph-Liste ist, hinzufügen
+    try{
+      if(!glyphs.includes(ch)){
+        glyphs.push(ch);
+      }
+    }catch(e){ /* ignore if glyphs isn't mutable for any reason */ }
+    // setze aktuelles Zeichen und baue Grid neu, damit das neue Zeichen sichtbar wird
+    setCurrentChar(ch);
+    buildGrid();
+    // leere das Eingabefeld
+    charInput.value = '';
+    // scrolle das neue Glyph-Button Element in View (falls vorhanden)
+    try{
+      const btn = glyphGridEl.querySelector('.glyph-btn[aria-selected]');
+      // prefer direct match by textContent
+      const found = Array.from(glyphGridEl.querySelectorAll('.glyph-btn')).find(b=>b.textContent === ch);
+      if(found) found.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }catch(e){}
+  });
+
+  // new: delete all samples for current char
+  function handleDeleteAllForChar(){
+    if(!collection[currentChar]) { showToast("Kein Sample für dieses Zeichen."); return; }
+    // backup for undo
+    const backup = collection[currentChar];
+    delete collection[currentChar]; saveCollection(); strokes=[]; currentStroke=null; updateUI(); redraw();
+    try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ char: currentChar, deletedAll:true } })); }catch(e){}
+    showToast(`Alle Samples für '${currentChar}' gelöscht.`, { undoLabel: 'Rückgängig', undo: ()=>{ collection[currentChar]=backup; saveCollection(); updateUI(); redraw(); try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ char: currentChar, restored:true } })); }catch(e){} }, timeout:8000 });
+  }
+  const delAllForCharBtn = document.getElementById('deleteAllForCharBtn');
+  if(delAllForCharBtn) delAllForCharBtn.addEventListener('click', handleDeleteAllForChar);
+  // new: clear all samples (global)
+  const clearAllBtn = document.getElementById('glyphClearAllBtn');
+  if(clearAllBtn){ clearAllBtn.addEventListener('click', ()=>{
+    // backup for undo
+    const backup = JSON.parse(JSON.stringify(collection));
+    collection = {}; saveCollection(); strokes=[]; currentStroke=null; buildGrid(); setCurrentChar('a'); redraw();
+    try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ clearedAll:true } })); }catch(e){}
+    showToast('Alle gespeicherten Samples gelöscht.', { undoLabel: 'Rückgängig', undo: ()=>{ collection = backup; saveCollection(); buildGrid(); setCurrentChar(Object.keys(collection)[0] || 'a'); redraw(); try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ restoredAll:true } })); }catch(e){} }, timeout:10000 });
+  }); }
+
+  // init
+  loadCollection(); try{ normalizeCollection(); } catch(e){}; loadGlyphSetsFromStorage(); buildGrid(); setCurrentChar("a");
+
+  // restore ink color from localStorage
+  (function restoreInkColor(){
+    try{
+      const raw = localStorage.getItem('glyphInkColor_v1');
+      if(raw){
+        const parsed = JSON.parse(raw);
+        if(parsed && parsed.color){
+          currentInkColor = parsed.color;
+          buildColorButtons();
+        }
+      }
+    }catch(e){}
+  })();
+
+  // Note: Stiftdicke UI for the Glyph Editor was removed by request. The internal
+  // variable `penWidth` remains (default 6) and is used by drawing routines.
+
+  // --- Scale handle: allows dragging bottom-right corner to scale the drawn glyph ---
+  (function setupGlyphScaleHandle(){
+    try{
+      const handle = document.createElement('div');
+      handle.id = 'glyphScaleHandle';
+      handle.title = 'Größe ziehen (horizontal ziehen)';
+      handle.textContent = '⇲';
+      // ensure wrapper is positioned
+      try{ glyphWrapper.style.position = glyphWrapper.style.position || 'relative'; }catch(e){}
+      glyphWrapper.appendChild(handle);
+
+
+  // create move handle (to translate strokes)
+  const moveHandle = document.createElement('div');
+  moveHandle.id = 'glyphMoveHandle';
+  moveHandle.title = 'Verschieben (ziehen)';
+  // use 4-direction arrow icon (cross/diamond shaped)
+  moveHandle.innerHTML = '<svg viewBox="0 0 512 512" fill="currentColor" style="width:14px; height:14px; display:block;"><path d="M256 48l96 96h-64v128h64l-96 96-96-96h64V144h-64z"/><path d="M464 256l-96-96v64H240v-64l-96 96 96 96v-64h128v64z"/><path d="M256 464l-96-96h64V240h-64l96-96 96 96h-64v128h64z"/><path d="M48 256l96 96v-64h128v64l96-96-96-96v64H144v-64z"/></svg>';
+  moveHandle.style.color = '#fff';
+  moveHandle.style.cursor = 'all-scroll';
+  glyphWrapper.appendChild(moveHandle);
+
+
+  // create zoom handle (proportional resize)
+  const zoomHandle = document.createElement('div');
+  zoomHandle.id = 'glyphResizeHandle';
+  zoomHandle.title = 'Canvas Zoom (proportional skalieren)';
+  zoomHandle.textContent = '⤡';
+  glyphWrapper.appendChild(zoomHandle);
+
+  // use existing reset button from HTML
+  const resetBtn = document.getElementById('glyphCanvasResetBtn');
+  if(!resetBtn){
+    console.warn('glyphCanvasResetBtn not found in DOM');
+  }
+      // --- Resize logic ---
+  let zooming = false, zoomStartX = 0, zoomStartY = 0, startW = 0, startH = 0, startStrokes = [], startCurrent = null;
+  // Seitenverhältnis wie Original (220x330 = 2:3)
+  const aspect = 2/3;
+  const defaultW = 220, defaultH = 330;
+  // Helper function to update reset button enabled state based on canvas size
+  function updateResetBtnState(){
+    const w = glyphWrapper.style.width || '220px';
+    const h = glyphWrapper.style.height || '330px';
+    const isDefaultSize = (w === '220px' && h === '330px');
+    resetBtn.disabled = isDefaultSize;
+  }
+  // Initialize button state
+  updateResetBtnState();
+  const minW = 60, minH = Math.round(minW / aspect); // 60x90 (smaller for mobile/ipad)
+  const maxW = 400, maxH = Math.round(maxW / aspect); // 400x600
+      zoomHandle.addEventListener('pointerdown', (ev)=>{
+        ev.preventDefault();
+        zoomHandle.setPointerCapture && zoomHandle.setPointerCapture(ev.pointerId);
+        zooming = true;
+        zoomStartX = ev.clientX;
+        zoomStartY = ev.clientY;
+        startW = glyphWrapper.offsetWidth;
+        startH = glyphWrapper.offsetHeight;
+        // deep copy strokes and currentStroke
+        startStrokes = strokes.map(s => s.map(p => ({...p})));
+        startCurrent = currentStroke ? currentStroke.map(p => ({...p})) : null;
+      });
+
+      resetBtn.addEventListener('click', ()=>{
+        // scale existing strokes back to default canvas size so guides remain aligned
+        try{
+          const curW = glyphWrapper.offsetWidth;
+          const curH = glyphWrapper.offsetHeight;
+          const newW = defaultW;
+          const newH = defaultH;
+          if(curW > 0 && curH > 0 && (curW !== newW || curH !== newH)){
+            const sx = newW / curW;
+            const sy = newH / curH;
+            // scale strokes and currentStroke proportionally (preserve sw/color)
+            strokes = strokes.map(s => s.map(p => ({ x: Math.round(p.x * sx), y: Math.round(p.y * sy), p: p.p, t: p.t, sw: (typeof p.sw === 'number' ? p.sw : undefined), color: p.color || undefined })));
+            if(currentStroke) currentStroke = currentStroke.map(p => ({ x: Math.round(p.x * sx), y: Math.round(p.y * sy), p: p.p, t: p.t, sw: (typeof p.sw === 'number' ? p.sw : undefined), color: p.color || undefined }));
+          }
+        }catch(e){ console.warn('reset scaling failed', e); }
+        // apply default wrapper size and reset visual transforms
+        glyphWrapper.style.width = defaultW + 'px';
+        glyphWrapper.style.height = defaultH + 'px';
+        glyphScale = 1;
+        glyphOffset = { x: 0, y: 0 };
+        setTimeout(sizeCanvas, 0);
+        updateResetBtnState();
+      });
+
+      let dragging = false, startX = 0, startY = 0, startScale = 1;
+      let draggingMove = false, moveStartX = 0, moveStartY = 0, moveStartOffset = { x: 0, y: 0 };
+      handle.addEventListener('pointerdown', (ev)=>{
+        ev.preventDefault();
+        handle.setPointerCapture && handle.setPointerCapture(ev.pointerId);
+        dragging = true; startX = ev.clientX; startY = ev.clientY; startScale = glyphScale;
+      });
+
+      moveHandle.addEventListener('pointerdown', (ev)=>{
+        ev.preventDefault();
+        moveHandle.setPointerCapture && moveHandle.setPointerCapture(ev.pointerId);
+        draggingMove = true; moveStartX = ev.clientX; moveStartY = ev.clientY; moveStartOffset = { x: glyphOffset.x, y: glyphOffset.y };
+      });
+
+      
+
+      window.addEventListener('pointermove', (ev)=>{
+        // proportional zoom dragging
+        if(zooming){
+          const dx = ev.clientX - zoomStartX;
+          const dy = ev.clientY - zoomStartY;
+          // use average of dx/dy for proportional scaling
+          const d = (dx + dy) / 2;
+          let scale = (startW + d) / startW;
+            // clamp scale so new size is within min/max, keeping aspect ratio
+            let newW = Math.max(minW, Math.min(maxW, Math.round(startW * scale)));
+            let newH = Math.max(minH, Math.min(maxH, Math.round(startH * scale)));
+            // enforce aspect ratio
+            newH = Math.round(newW / aspect);
+            scale = newW / startW; // recalc scale after clamp
+            glyphWrapper.style.width = newW + 'px';
+            glyphWrapper.style.height = newH + 'px';
+          // scale all strokes and currentStroke
+          function scalePoints(arr){
+            const w0 = startW, h0 = startH, w1 = newW, h1 = newH;
+            return arr.map(s => s.map(p => ({
+              x: p.x * (w1/w0),
+              y: p.y * (h1/h0),
+              p: p.p, t: p.t,
+              sw: (typeof p.sw === 'number' ? p.sw : undefined),
+              color: p.color || undefined
+            })));
+          }
+          strokes = scalePoints(startStrokes);
+          currentStroke = startCurrent ? startCurrent.map(p => ({
+            x: p.x * (newW/startW),
+            y: p.y * (newH/startH),
+            p: p.p, t: p.t,
+            sw: (typeof p.sw === 'number' ? p.sw : undefined),
+            color: p.color || undefined
+          })) : null;
+          setTimeout(sizeCanvas, 0);
+          redraw();
+          updateResetBtnState();
+        }
+        // scale dragging
+        if(dragging){
+          const dx = ev.clientX - startX;
+          let newScale = startScale * (1 + dx / 250);
+          newScale = Math.max(0.2, Math.min(4, newScale));
+          if(Math.abs(newScale - glyphScale) > 0.0005){ glyphScale = newScale; redraw(); }
+        }
+        // move dragging
+        if(draggingMove){
+          const dx = ev.clientX - moveStartX;
+          const dy = ev.clientY - moveStartY;
+          glyphOffset.x = moveStartOffset.x + dx;
+          glyphOffset.y = moveStartOffset.y + dy;
+          redraw();
+        }
+      });
+
+      window.addEventListener('pointerup', (ev)=>{
+        if(zooming){ zooming = false; try{ zoomHandle.releasePointerCapture && zoomHandle.releasePointerCapture(ev.pointerId); }catch(e){} }
+        if(dragging){ dragging = false; try{ handle.releasePointerCapture && handle.releasePointerCapture(ev.pointerId); }catch(e){} }
+        if(draggingMove){ draggingMove = false; try{ moveHandle.releasePointerCapture && moveHandle.releasePointerCapture(ev.pointerId); }catch(e){} }
+      });
+
+      // double-click to reset
+      handle.addEventListener('dblclick', ()=>{ glyphScale = 1; redraw(); });
+    }catch(e){ console.warn('glyph scale handle setup failed', e); }
+  })();
+
+  // expose ink color and pen width to other modules (Tab 3 Renderer, Tab 4 Convert, etc.)
+  window.__handwritingGlyph = {
+    getInkColor: ()=> currentInkColor,
+    // Helper function to compute stroke width for a stroke array, using penWidth and pressure.
+    getStrokeWidth: (strokePoints, scale = 1) => {
+      if(!strokePoints || strokePoints.length === 0) return penWidth * (scale || 1);
+      const avgP = strokePoints.reduce((a,p)=>a+(p.p||0.5),0)/strokePoints.length;
+      return Math.max(0.3, penWidth * Math.max(0.12, avgP) * (scale || 1));
+    }
+  };
+
+  // --- Collapsible debug pane for last sample JSON (preserve DOM & functionality) ---
+  (function setupGlyphDebugToggle(){
+    try{
+      const wrap = document.getElementById('glyphDebugWrap');
+      const btn = document.getElementById('glyphDebugToggle');
+      if(!wrap || !btn) return;
+      const storageKey = 'glyphDebugCollapsed_v1';
+      function setState(collapsed){
+        if(collapsed){ wrap.classList.add('collapsed'); btn.textContent = 'Anzeigen'; btn.setAttribute('aria-expanded','false'); }
+        else { wrap.classList.remove('collapsed'); btn.textContent = 'Ausblenden'; btn.setAttribute('aria-expanded','true'); }
+        try{ localStorage.setItem(storageKey, JSON.stringify({collapsed: !!collapsed})); }catch(e){}
+      }
+      // restore
+      try{ const raw = localStorage.getItem(storageKey); if(raw){ const parsed = JSON.parse(raw); setState(!!parsed.collapsed); } }
+      catch(e){ /* ignore */ }
+      btn.addEventListener('click', ()=>{ const isCollapsed = wrap.classList.contains('collapsed'); setState(!isCollapsed); });
+    }catch(e){ console.warn('setupGlyphDebugToggle failed', e); }
+  })();
+
+  // Glyph sets UI bindings
+  const glyphSetSaveBtn = document.getElementById('glyphSetSaveBtn');
+  const glyphSetLoadBtn = document.getElementById('glyphSetLoadBtn');
+  const glyphSetDeleteBtn = document.getElementById('glyphSetDeleteBtn');
+  const glyphSetNameInput = document.getElementById('glyphSetNameInput');
+  const glyphSetSelect = document.getElementById('glyphSetSelect');
+  if(glyphSetSaveBtn){ glyphSetSaveBtn.addEventListener('click', ()=>{
+    const name = glyphSetNameInput && glyphSetNameInput.value ? glyphSetNameInput.value.trim() : null;
+    const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,8);
+    try{ const copy = JSON.parse(JSON.stringify(collection)); glyphSets[id] = { id, name: name || `Set ${new Date().toLocaleString()}`, createdAt: new Date().toISOString(), collection: copy }; saveGlyphSetsToStorage(); alert('Glyph-Set gespeichert.'); }catch(e){ alert('Speichern fehlgeschlagen: '+e.message); }
+  }); }
+  if(glyphSetLoadBtn){ glyphSetLoadBtn.addEventListener('click', ()=>{
+    const id = glyphSetSelect.value; if(!id) return alert('Bitte ein Set wählen.'); if(!glyphSets[id]) return alert('Set nicht gefunden.'); if(!confirm('Bestehende lokale Glyphs werden überschrieben. Fortfahren?')) return; try{ collection = JSON.parse(JSON.stringify(glyphSets[id].collection)); saveCollection(); buildGrid(); setCurrentChar(Object.keys(collection)[0] || 'a'); alert('Glyph-Set geladen.'); }catch(e){ alert('Laden Fehlgeschlagen: '+e.message); }
+    try{ window.dispatchEvent(new CustomEvent('handwriting:glyphs-updated', { detail:{ fromSet:id } })); }catch(e){}
+  }); }
+  if(glyphSetDeleteBtn){ glyphSetDeleteBtn.addEventListener('click', ()=>{
+    const id = glyphSetSelect.value; if(!id) return alert('Bitte ein Set wählen.'); if(!glyphSets[id]) return alert('Set nicht gefunden.'); if(!confirm('Set wirklich löschen?')) return; delete glyphSets[id]; saveGlyphSetsToStorage(); alert('Set gelöscht.');
+  }); }
+})();
+
+/* ============================================================
+   Part 2: Background Calibrator (Save/Load collection)
+   - stores active meta under handwriting_background_v1
+   - stores collection under handwriting_backgrounds_v1
+   ============================================================ */
+(function BgModule(){
+const fileInput = document.getElementById('bgFileInput');
+const canvas = document.getElementById('bgCanvas');
+const ctx = canvas.getContext('2d');
+const labelA = document.getElementById('bgLabelA');
+const labelB = document.getElementById('bgLabelB');
+const labelC = document.getElementById('bgLabelC');
+const labelD = document.getElementById('bgLabelD');
+const labelE = document.getElementById('bgLabelE');
+const lineSpacingEl = document.getElementById('bgLineSpacing');
+const linesPerPageEl = document.getElementById('bgLinesPerPage');
+const lineShiftEl = document.getElementById('bgLineShift');
+const metaDebug = document.getElementById('bgMetaDebug');
+
+const bgNameInput = document.getElementById('bgNameInput');
+const bgSavedSelect = document.getElementById('bgSavedSelect');
+const bgLoadSavedBtn = document.getElementById('bgLoadSavedBtn');
+const bgDeleteSavedBtn = document.getElementById('bgDeleteSavedBtn');
+const bgSaveBtn = document.getElementById('bgSaveBtn'); // this is the new "Speichern" button near the name input
+
+const storageKeyCurrent = "handwriting_background_v1";   // expected by RenderModule (active background)
+const storageKeyCollection = "handwriting_backgrounds_v1"; // collection of saved backgrounds
+
+let imageObj = null, imageDataURL = null, scaleToCanvas = 1, naturalW=0, naturalH=0;
+let savedCollection = {}; // id -> { id, name, meta, imageDataURL, createdAt }
+
+/* ---------- Preset backgrounds (no upload required) ---------- */
+const presets = [
+    { 
+      id: 'ruled', 
+      name: 'Liniert (Standard)', 
+      patternHeight: 80, 
+      patternLineY: 60,
+      // Line positions for A,B,C,D,E (fractions of viewBox 1200x1700)
+      linePositions: { A: 0.035, B: 0.082, C: 0.978, D: 0.02, E: 0.98 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <pattern id="lines" patternUnits="userSpaceOnUse" width="1200" height="80">
+            <rect width="1200" height="80" fill="#ffffff"/>
+            <line x1="0" y1="60" x2="1200" y2="60" stroke="#dbeefb" stroke-width="3"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#lines)"/>
+      </svg>` 
+    },
+    { 
+      id: 'ruled-large', 
+      name: 'Liniert (weit)', 
+      patternHeight: 120, 
+      patternLineY: 90,
+      // Line positions for A,B,C,D,E
+      linePositions: { A: 0.053, B: 0.124, C: 0.985, D: 0.02, E: 0.98 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <pattern id="lines2" patternUnits="userSpaceOnUse" width="1200" height="120">
+            <rect width="1200" height="120" fill="#ffffff"/>
+            <line x1="0" y1="90" x2="1200" y2="90" stroke="#d0e9ff" stroke-width="4"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#lines2)"/>
+      </svg>` 
+    },
+    { 
+      id: 'dotted', 
+      name: 'Punktgitter',
+      patternHeight: 40, 
+      patternLineY: 37,
+      // Line positions for dotted grid (first grid line around 37/1700, etc.)
+      linePositions: { A: 0.011780408, B: 0.035283194057, C: 1, D: 0.020466694078, E: 0.95512952302 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <pattern id="dots" patternUnits="userSpaceOnUse" width="40" height="40">
+            <rect width="40" height="40" fill="#fff"/>
+            <circle cx="20" cy="20" r="1.2" fill="#cfdff0"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#dots)"/>
+      </svg>` 
+    },
+    { 
+      id: 'graph', 
+      name: 'kariert',
+      patternHeight: 24,
+      patternLineY: 24,
+      // Line positions for fine grid (24px squares)
+      linePositions: { A: 0.02908107010213556, B: 0.05765436397400186, C: 0.988, D: 0.02, E: 0.98 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <pattern id="grid" patternUnits="userSpaceOnUse" width="24" height="24">
+            <rect width="24" height="24" fill="#ffffff"/>
+            <path d="M24 0 L0 0 0 24" fill="none" stroke="#e6edf3" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+      </svg>` 
+    },
+    { 
+      id: 'graph-large', 
+      name: 'kariert (groß)',
+      patternHeight: 48,
+      patternLineY: 48,
+      // Line positions for larger grid (48px squares)
+      linePositions: { A: 0.028362929433611885, B: 0.08458101207056638, C: 0.988, D: 0.02, E: 0.98 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <pattern id="gridLarge" patternUnits="userSpaceOnUse" width="48" height="48">
+            <rect width="48" height="48" fill="#ffffff"/>
+            <path d="M48 0 L0 0 0 48" fill="none" stroke="#e6edf3" stroke-width="1.2"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#gridLarge)"/>
+      </svg>` 
+    },
+    { 
+      id: 'parchment', 
+      name: 'Pergament',
+      // Parchment hat keine Linien – D/E Defaults
+      linePositions: { D: 0.02, E: 0.98 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#fbf7ef"/>
+            <stop offset="100%" stop-color="#f2ead8"/>
+          </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#g1)"/>
+        <g opacity="0.06" fill="#d6c9a6">
+          <rect x="0" y="120" width="1200" height="20" transform="skewX(-10)"/>
+          <rect x="0" y="820" width="1200" height="14" transform="skewX(8)"/>
+        </g>
+      </svg>` 
+    },
+    { 
+      id: 'blue-gradient', 
+      name: 'Blau-Verlauf',
+      // Gradient – keine Linien, nur D/E Defaults
+      linePositions: { D: 0.02, E: 0.98 },
+      svg: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1700" viewBox="0 0 1200 1700">
+        <defs>
+          <linearGradient id="bg" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#f7fbff"/>
+            <stop offset="100%" stop-color="#e6f2ff"/>
+          </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#bg)"/>
+      </svg>` 
+    },
+];
+
+function svgToDataURL(svg){ return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); }
+
+function renderPresetButtons(){
+    const container = document.getElementById('bgPresets'); if(!container) { console.warn('bgPresets container not found'); return; }
+    console.log('renderPresetButtons: rendering', presets.length, 'presets');
+    container.innerHTML = '';
+    for(const p of presets){
+      const btn = document.createElement('button'); btn.type='button'; btn.className='preset-btn'; btn.title = p.name;
+      const img = document.createElement('img'); img.className='preset-thumb'; img.alt = p.name;
+      // support svg presets and imageDataURL presets (saved backgrounds)
+      try{
+        if(p.imageDataURL) img.src = p.imageDataURL;
+        else img.src = svgToDataURL(p.svg);
+      }catch(e){ img.src = ''; }
+      btn.appendChild(img);
+  btn.addEventListener('click', ()=>{ document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); applyPresetAndNotify(p); });
+      container.appendChild(btn);
+    }
+    // append user-saved backgrounds (persisted collection) to presets UI
+    try{
+      const keys = Object.keys(savedCollection||{}).sort((a,b)=> (savedCollection[b].createdAt||'') - (savedCollection[a].createdAt||''));
+      for(const id of keys){
+        const item = savedCollection[id];
+        const btn = document.createElement('button'); btn.type='button'; btn.className='preset-btn user-preset'; btn.title = item.name || '(saved)';
+        const img = document.createElement('img'); img.className='preset-thumb'; img.alt = item.name || '(saved)'; img.src = item.imageDataURL || '';
+        btn.appendChild(img);
+        // small badge to indicate user-saved preset
+        const badge = document.createElement('div'); badge.className = 'user-badge'; badge.textContent = 'Eigene'; btn.appendChild(badge);
+        // delete control (visible only for user presets)
+        const del = document.createElement('div'); del.className = 'user-delete'; del.title = 'Löschen'; del.textContent = '✕';
+        // stop events from triggering parent button
+        del.addEventListener('click', (ev)=>{
+          ev.stopPropagation(); ev.preventDefault();
+          // delete without modal confirmation (instant + undo is not implemented for backgrounds)
+          try{
+            const rawCur = localStorage.getItem(storageKeyCurrent);
+            if(rawCur){ const cur = JSON.parse(rawCur); if(cur && cur.imageDataURL && cur.imageDataURL === item.imageDataURL){ /* switch to default builtin preset */ applyPreset(presets[0]); } }
+          }catch(e){}
+          try{ deleteSavedBackground(item.id, true); }catch(e){}
+          try{ renderPresetButtons(); }catch(e){}
+        });
+        btn.appendChild(del);
+        btn.addEventListener('click', ()=>{ document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); applyPresetAndNotify(item); });
+        container.appendChild(btn);
+      }
+    }catch(e){ /* ignore */ }
+    if(container.children.length===0){
+      const hint = document.getElementById('bgPresetsHint'); if(hint) hint.textContent = '(keine Presets gerendert)' ;
+    } else {
+      const hint = document.getElementById('bgPresetsHint'); if(hint) hint.textContent = '(klicke Miniatur zur Vorschau)';
+    }
+}
+
+function applyPreset(preset){
+    // support svg-presets (preset.svg) and image-presets (preset.imageDataURL)
+    let dataURL = '';
+    if(preset.imageDataURL) dataURL = preset.imageDataURL;
+    else if(preset.svg) dataURL = svgToDataURL(preset.svg);
+    console.log('applyPreset', preset.id || preset.name || '(custom)');
+    // If preset already contains saved metadata (user-saved background), restore exactly
+    if(preset && preset.meta){
+      imageDataURL = preset.imageDataURL || dataURL;
+      const img = new Image();
+      img.onload = ()=>{
+        imageObj = img; imageDataURL = imageDataURL;
+        // render image but DO NOT reset stored line positions
+        renderImageToCanvasWithoutResetLines(img);
+        try{
+          const meta = preset.meta || {};
+          if(meta.lines){
+            // restore exact fractions if available, fallback to sensible defaults
+            setLabelTop(labelA, (meta.lines.A && typeof meta.lines.A.frac === 'number') ? meta.lines.A.frac : 0.15);
+            setLabelTop(labelB, (meta.lines.B && typeof meta.lines.B.frac === 'number') ? meta.lines.B.frac : 0.30);
+            setLabelTop(labelC, (meta.lines.C && typeof meta.lines.C.frac === 'number') ? meta.lines.C.frac : 0.85);
+            setLabelTop(labelD, (meta.lines.D && typeof meta.lines.D.frac === 'number') ? meta.lines.D.frac : 0.02);
+            setLabelTop(labelE, (meta.lines.E && typeof meta.lines.E.frac === 'number') ? meta.lines.E.frac : 0.98);
+          }
+          computeMetricsAndPreview();
+          // persist as current background meta for renderer
+          try{ localStorage.setItem(storageKeyCurrent, JSON.stringify(meta)); }catch(e){}
+          window.dispatchEvent(new CustomEvent('handwriting:background-updated', { detail:{ id: preset.id || null, meta } }));
+        }catch(e){ console.warn('applyPreset (with meta) failed', e); }
+      };
+      img.src = imageDataURL;
+      return;
+    }
+
+    // default behavior (svg presets or image presets without saved meta)
+    imageDataURL = dataURL;
+    const img = new Image();
+    img.onload = ()=>{
+      imageObj = img; imageDataURL = dataURL; renderImageToCanvas(img); computeMetricsAndPreview();
+      try{
+        // If preset defines explicit linePositions (A,B,C,D,E), use them directly
+        if(preset && preset.linePositions && typeof preset.linePositions === 'object'){
+          try{
+            const pos = preset.linePositions;
+            // Set all available label positions (with sensible fallback defaults)
+            setLabelTop(labelA, (typeof pos.A === 'number') ? pos.A : 0.15);
+            setLabelTop(labelB, (typeof pos.B === 'number') ? pos.B : 0.30);
+            setLabelTop(labelC, (typeof pos.C === 'number') ? pos.C : 0.85);
+            setLabelTop(labelD, (typeof pos.D === 'number') ? pos.D : 0.02);
+            setLabelTop(labelE, (typeof pos.E === 'number') ? pos.E : 0.98);
+            computeMetricsAndPreview();
+          }catch(e){ console.warn('linePositions apply failed', e); }
+        } else if(preset && typeof preset.patternHeight === 'number' && typeof preset.patternLineY === 'number'){
+          // Fallback: If preset has patternHeight/patternLineY (old format), compute positions
+          try{
+            // viewBox height used in presets is 1700
+            const viewBoxH = 1700;
+            const patternH = preset.patternHeight;
+            const lineY = preset.patternLineY;
+            // fraction of one tile where the visible line sits
+            const lineWithinTileFrac = lineY / patternH; // e.g. 60/80 = 0.75
+            // first visible line fraction (top of the first tile's line)
+            const firstLineFrac = (lineWithinTileFrac * patternH) / viewBoxH;
+            const spacingFrac = patternH / viewBoxH;
+            // set A to firstLineFrac (or keep small margin if too close to 0)
+            const A = Math.max(0.03, firstLineFrac);
+            const B = Math.min(0.98, A + spacingFrac);
+            setLabelTop(labelA, A);
+            setLabelTop(labelB, B);
+            // keep C near bottom as before
+            setLabelTop(labelC, 0.85);
+            // D/E defaults if not explicitly set
+            setLabelTop(labelD, 0.02);
+            setLabelTop(labelE, 0.98);
+            // recompute preview after adjusting
+            computeMetricsAndPreview();
+          }catch(e){ /* ignore preset positioning errors */ }
+        }
+
+        const meta = buildMetadata();
+        if(meta) {
+          localStorage.setItem(storageKeyCurrent, JSON.stringify(meta));
+          // include the full meta in the event so other modules can react immediately
+          window.dispatchEvent(new CustomEvent('handwriting:background-updated', { detail:{ id: preset.id || null, meta } }));
+        }
+      }catch(e){}
+    };
+    img.src = dataURL;
+}
+
+// notify renderer when applyPreset sets current meta (same-window events)
+function applyPresetAndNotify(preset){
+  // applyPreset will store meta and dispatch once image is loaded
+  applyPreset(preset);
+}
+
+/* ---------- helpers ---------- */
+function renderImageToCanvas(img){
+    const container = canvas.parentElement.parentElement;
+    const maxW = Math.min(container.clientWidth, 760);
+    const aspect = img.width / img.height;
+    const dispW = Math.min(maxW, img.width);
+    const dispH = Math.round(dispW / aspect);
+    canvas.style.width = dispW + 'px';
+    canvas.style.height = dispH + 'px';
+    const dpr = window.devicePixelRatio||1;
+    canvas.width = Math.round(dispW * dpr);
+    canvas.height = Math.round(dispH * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,dispW,dispH);
+    ctx.drawImage(img,0,0,dispW,dispH);
+    scaleToCanvas = img.width / dispW;
+    naturalW = img.width; naturalH = img.height;
+    setLabelTop(labelA, 0.15); 
+    setLabelTop(labelB, 0.30); 
+    setLabelTop(labelC, 0.85);
+    setLabelTop(labelD, 0.02);
+    setLabelTop(labelE, 0.98);
+    computeMetricsAndPreview();
+}
+
+// Like renderImageToCanvas but does NOT reset line positions (used for loading saved backgrounds)
+function renderImageToCanvasWithoutResetLines(img){
+    const container = canvas.parentElement.parentElement;
+    const maxW = Math.min(container.clientWidth, 760);
+    const aspect = img.width / img.height;
+    const dispW = Math.min(maxW, img.width);
+    const dispH = Math.round(dispW / aspect);
+    canvas.style.width = dispW + 'px';
+    canvas.style.height = dispH + 'px';
+    const dpr = window.devicePixelRatio||1;
+    canvas.width = Math.round(dispW * dpr);
+    canvas.height = Math.round(dispH * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,dispW,dispH);
+    ctx.drawImage(img,0,0,dispW,dispH);
+    scaleToCanvas = img.width / dispW;
+    naturalW = img.width; naturalH = img.height;
+    // DO NOT reset line positions - caller will set them
+}
+
+function getLabelPos(label){
+    const wrap = canvas.getBoundingClientRect();
+    const lrect = label.getBoundingClientRect();
+    const isVertical = label.classList.contains('vertical');
+    if(isVertical){
+        const xCenter = lrect.left + lrect.width/2;
+        const rel = (xCenter - wrap.left) / wrap.width;
+        return Math.max(0, Math.min(1, rel));
+    } else {
+        const yCenter = lrect.top + lrect.height/2;
+        const rel = (yCenter - wrap.top) / wrap.height;
+        return Math.max(0, Math.min(1, rel));
+    }
+}
+function setLabelTop(label, frac){
+  const parent = label.parentElement;
+  const isVertical = label.classList.contains('vertical');
+  // compute canvas position relative to parent so labels align correctly
+  // Use offset measurements which are synchronous and stable even during reflows
+  // canvas.offsetLeft/Top are relative to the offsetParent (the positioned ancestor),
+  // which in this layout is the same parent element that contains the labels.
+  const canvasLeft = canvas.offsetLeft || 0;
+  const canvasTop = canvas.offsetTop || 0;
+  const canvasDisplayW = canvas.offsetWidth || (canvas.width / (window.devicePixelRatio || 1));
+  const canvasDisplayH = canvas.offsetHeight || (canvas.height / (window.devicePixelRatio || 1));
+  if(isVertical){
+    // For vertical labels (D, E): compute pixel offset inside parent
+    const leftPx = canvasLeft + frac * canvasDisplayW - label.offsetWidth/2;
+    label.style.position = 'absolute';
+    // ensure we don't leave the CSS 'right' value active (it would conflict)
+    label.style.right = 'auto';
+    label.style.left = leftPx + 'px';
+    label.style.top = '8px';
+  } else {
+    // For horizontal labels (A, B, C): compute top offset inside parent
+    const topPx = canvasTop + frac * canvasDisplayH - label.offsetHeight/2;
+    label.style.position = 'absolute';
+    // horizontal labels should not carry a leftover 'right' value
+    label.style.right = '';
+    label.style.left = '8px';
+    label.style.top = topPx + 'px';
+  }
+}
+
+function computeMetricsAndPreview(){
+    if(!imageObj) return;
+    const canvasH = canvas.height / (window.devicePixelRatio || 1);
+    const canvasW = canvas.width / (window.devicePixelRatio || 1);
+    const posA = getLabelPos(labelA), posB = getLabelPos(labelB), posD = getLabelPos(labelD), posE = getLabelPos(labelE);
+    const yA = posA * canvasH, yB = posB * canvasH;
+    const xD = posD * canvasW, xE = posE * canvasW;
+    const spacing_css = Math.abs(yB - yA);
+    const spacing_original = spacing_css * scaleToCanvas;
+    const linesPerPage = Math.floor(naturalH / Math.max(1, spacing_original));
+    lineSpacingEl.textContent = `${Math.round(spacing_css)} px (${(spacing_css/canvasH*100).toFixed(1)}%) — orig: ${Math.round(spacing_original)} px`;
+    linesPerPageEl.textContent = `${linesPerPage} Zeilen`;
+    lineShiftEl.textContent = `${Math.round(spacing_css)} px (CSS) ≈ ${Math.round(spacing_original)} px (Original)`;
+    
+    // Update D/E stats
+    try{
+        const deStats = document.getElementById('lineDEStats');
+        if(deStats){
+            const marginWidth_css = Math.abs(xE - xD);
+            const marginWidth_original = marginWidth_css * scaleToCanvas;
+            deStats.textContent = `D (links): ${Math.round(posD*100)}%\nE (rechts): ${Math.round(posE*100)}%\nSchreibbreite: ${Math.round(marginWidth_css)}px (${(marginWidth_css/canvasW*100).toFixed(1)}%) — orig: ${Math.round(marginWidth_original)}px`;
+        }
+    }catch(e){/* ignore */}
+    
+    redrawOverlay();
+    
+    // if preview text is enabled, re-render it with the new spacing
+    try{
+        const previewToggle = document.getElementById('bgPreviewToggle');
+        const previewTextEl = document.getElementById('bgPreviewText');
+        if(previewToggle && previewToggle.checked && previewTextEl){
+            renderTextPreview(previewTextEl.value || previewTextEl.placeholder || '');
+        }
+    }catch(e){/* ignore */}
+    
+    const meta = buildMetadata();
+    metaDebug.textContent = JSON.stringify(meta, null, 2);
+}
+
+function redrawOverlay(){
+    if(!imageObj) return;
+    const dpr = window.devicePixelRatio||1;
+    const dispW = canvas.width / dpr, dispH = canvas.height / dpr;
+    ctx.clearRect(0,0,dispW,dispH); 
+    ctx.drawImage(imageObj,0,0,dispW,dispH);
+    const posA = getLabelPos(labelA), posB = getLabelPos(labelB), posC = getLabelPos(labelC);
+    const posD = getLabelPos(labelD), posE = getLabelPos(labelE);
+    const yA = posA * dispH, yB = posB * dispH, yC = posC * dispH;
+    const xD = posD * dispW, xE = posE * dispW;
+    ctx.save(); 
+    ctx.globalAlpha = 0.95;
+    // horizontal lines
+    ctx.strokeStyle="#1e88e5"; ctx.lineWidth=2; 
+    ctx.beginPath(); ctx.moveTo(0,yA+0.5); ctx.lineTo(dispW,yA+0.5); ctx.stroke();
+    ctx.strokeStyle="#2e7d32"; 
+    ctx.beginPath(); ctx.moveTo(0,yB+0.5); ctx.lineTo(dispW,yB+0.5); ctx.stroke();
+    ctx.strokeStyle="#c62828"; 
+    ctx.beginPath(); ctx.moveTo(0,yC+0.5); ctx.lineTo(dispW,yC+0.5); ctx.stroke();
+    // vertical lines
+    ctx.strokeStyle="#d197d1"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(xD+0.5,0); ctx.lineTo(xD+0.5,dispH); ctx.stroke();
+    ctx.strokeStyle="#e89b45";
+    ctx.beginPath(); ctx.moveTo(xE+0.5,0); ctx.lineTo(xE+0.5,dispH); ctx.stroke();
+    ctx.restore();
+}
+
+// Render a short text preview onto the background canvas using current labels/spacing
+// Now renders with glyphs (handwriting samples) if available, otherwise falls back to normal text
+function renderTextPreview(text){
+    if(!imageObj) return;
+    redrawOverlay();
+    const dpr = window.devicePixelRatio||1;
+    const dispW = canvas.width / dpr, dispH = canvas.height / dpr;
+  const posA = getLabelPos(labelA), posB = getLabelPos(labelB), posC = getLabelPos(labelC);
+  const pageA_y = posA * dispH;
+  const pageB_y = posB * dispH;
+  const pageC_y = posC * dispH;
+    const spacing = Math.max(2, Math.abs(pageB_y - pageA_y) || Math.round(dispH/12));
+    const lines = (text||'').split('\n');
+    
+    // load glyphs from storage for preview rendering
+    let glyphCollection = {};
+    try { glyphCollection = JSON.parse(localStorage.getItem('handwriting_single_sample_v1') || "{}"); } catch(e){}
+    // migrate single-sample entries to arrays
+    for(const k of Object.keys(glyphCollection)){
+      const v = glyphCollection[k];
+      if(v && !Array.isArray(v) && typeof v === 'object' && v.strokes) glyphCollection[k] = [v];
+    }
+    
+    // helper: get glyph sample for char
+    function getGlyphSamplePreview(ch){
+      if(!glyphCollection) return null;
+      const entry = glyphCollection[ch];
+      if(!entry) return null;
+      const arr = Array.isArray(entry) ? entry : [entry];
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+    
+    // helper: draw glyph or fallback text at position
+    function drawGlyphOrFallback(c, ch, x, topLineY, lineSpacing){
+      const sample = getGlyphSamplePreview(ch);
+      const inkColor = (window.__handwritingGlyph && typeof window.__handwritingGlyph.getInkColor === 'function')
+        ? window.__handwritingGlyph.getInkColor()
+        : '#222';
+      
+      if(!sample){
+        // fallback: draw keyboard character
+        c.save();
+        c.fillStyle = inkColor;
+        let fontSize = lineSpacing > 0 ? Math.max(8, Math.round(lineSpacing * 0.8)) : Math.round(spacing * 0.7);
+        c.font = `${fontSize}px serif`;
+        c.textBaseline = 'alphabetic';
+        const yPos = topLineY + Math.round(lineSpacing);
+        c.fillText(ch, x, yPos);
+        const w = c.measureText(ch).width;
+        c.restore();
+        return w;
+      }
+      
+      // draw glyph sample
+      const bbox = sample.boundingBox && typeof sample.boundingBox.xMin === 'number'
+        ? sample.boundingBox
+        : (function(){
+            const xs = [];
+            for(const s of sample.strokes || []) for(const p of s) xs.push(p.x);
+            if(!xs.length) return { xMin: 0, xMax: sample.canvasSize ? sample.canvasSize.w : 50 };
+            return { xMin: Math.min(...xs), xMax: Math.max(...xs) };
+          })();
+      
+      const uniformScale = lineSpacing / Math.max(1, sample.canvasSize && sample.canvasSize.h ? sample.canvasSize.h * (2/3) : 220);
+      const glyphWidth = (bbox.xMax - bbox.xMin) * uniformScale;
+      const yTranslate = topLineY;
+      const xTranslate = x - (bbox.xMin * uniformScale);
+      
+      c.save();
+      for(const s of (sample.strokes || [])){
+        if(!s || s.length === 0) continue;
+        c.beginPath();
+        c.moveTo(xTranslate + s[0].x * uniformScale, yTranslate + s[0].y * uniformScale);
+        for(let i=1;i<s.length;i++){
+          const prev = s[i-1], cur = s[i];
+          const mx = (prev.x + cur.x)/2, my = (prev.y + cur.y)/2;
+          c.quadraticCurveTo(xTranslate + prev.x * uniformScale, yTranslate + prev.y * uniformScale, xTranslate + mx * uniformScale, yTranslate + my * uniformScale);
+        }
+        const avgP = s.reduce((acc, p) => acc + (p.p || 0.5), 0) / s.length;
+        c.lineWidth = Math.max(1, 6 * avgP * uniformScale);
+        c.strokeStyle = inkColor;
+        c.lineCap = 'round';
+        c.lineJoin = 'round';
+        c.stroke();
+      }
+      c.restore();
+      
+      return glyphWidth;
+    }
+    
+    ctx.save();
+    // Determine horizontal writing limits from D/E labels if available
+    const posD = getLabelPos(labelD), posE = getLabelPos(labelE);
+    const leftLimit = Math.max(4, Math.round(posD * dispW));
+    const rightLimit = Math.max(leftLimit + 20, Math.round(posE * dispW));
+
+    // Ensure the example fills all available baselines up to C (user requested)
+    const maxLines = Math.max(1, Math.floor((pageC_y - pageA_y) / spacing));
+    // If the provided text has fewer lines than available, repeat it to fill the page
+    let inputLines = (text || '').split('\n');
+    if(inputLines.length < maxLines){
+      const joinText = inputLines.length ? inputLines.join(' ') : (text || 'Lorem ipsum dolor sit amet');
+      const repeated = [];
+      for(let i=0;i<maxLines;i++){
+        // rotate start to create some variation
+        repeated.push(joinText);
+      }
+      inputLines = repeated;
+    }
+
+    for(let i=0; i<inputLines.length; i++){
+      const line = inputLines[i];
+      const topLineY = pageA_y + i * spacing;
+      let curX = leftLimit + 8; // small padding from D
+      for(let j=0; j<line.length; j++){
+        const ch = line[j];
+        if(ch === ' '){
+          curX += spacing * 0.3; // space width
+          continue;
+        }
+        // Wrap to next visual column/line when exceeding rightLimit
+        if(curX > rightLimit - 6){
+          // nothing more fits on this line horizontally
+          break;
+        }
+        const advance = drawGlyphOrFallback(ctx, ch, curX, topLineY, spacing);
+        curX += advance + Math.max(2, spacing * 0.08);
+        // if next glyph would exceed rightLimit, stop this line
+        if(curX > rightLimit - 6) break;
+      }
+    }
+    ctx.restore();
+}
+
+function buildMetadata(){
+    if(!imageObj) return null;
+    const posA = getLabelPos(labelA), posB = getLabelPos(labelB), posC = getLabelPos(labelC), posD = getLabelPos(labelD), posE = getLabelPos(labelE);
+    const container = canvas.getBoundingClientRect();
+    const cssW = container.width, cssH = container.height;
+    const meta = { 
+        source:{ originalWidth: naturalW, originalHeight:naturalH }, 
+        imageDataURL, 
+        lines:{ 
+            A:{frac:posA, cssY:posA*cssH}, 
+            B:{frac:posB, cssY:posB*cssH}, 
+            C:{frac:posC, cssY:posC*cssH},
+            D:{frac:posD, cssX:posD*cssW},
+            E:{frac:posE, cssX:posE*cssW}
+        }, 
+        computed:{} 
+    };
+    const canvasH = canvas.height / (window.devicePixelRatio || 1);
+    const yA = posA * canvasH, yB = posB * canvasH;
+    const spacing_css = Math.abs(yB - yA); 
+    const spacing_original = spacing_css * scaleToCanvas;
+    meta.computed.spacing = { cssPx: spacing_css, originalPx: spacing_original, pctHeight: spacing_css / canvasH };
+    meta.computed.linesPerPage = Math.floor(naturalH / Math.max(1, spacing_original));
+    meta.computed.lineShift = { cssPx: spacing_css, originalPx: spacing_original };
+    meta.lineHeight = { cssPx: Math.round(spacing_css), originalPx: Math.round(spacing_original), pctHeight: +(spacing_css / canvasH).toFixed(4) };
+    return meta;
+}
+
+function makeDraggable(label){
+  let dragging=false, offsetY=0, offsetX=0;
+  const parent = label.parentElement;
+  const isVertical = label.classList.contains('vertical');
+    
+    function down(e){ 
+        e.preventDefault(); 
+        dragging=true; 
+        const rect = label.getBoundingClientRect(); 
+        if(isVertical){
+            const px = e.touches?e.touches[0].clientX:e.clientX; 
+            offsetX = px - rect.left - rect.width/2;
+        } else {
+            const py = e.touches?e.touches[0].clientY:e.clientY; 
+            offsetY = py - rect.top - rect.height/2;
+        }
+        label.style.pointerEvents='none'; 
+    }
+    
+    function move(e){ 
+        if(!dragging) return; 
+        const parentRect = parent.getBoundingClientRect();
+        
+        if(isVertical){
+            const px = e.touches?e.touches[0].clientX:e.clientX; 
+            const x = px - parentRect.left - offsetX; 
+            let left = Math.max(0, Math.min(parentRect.width, x)); 
+            
+            // Constraints für D und E
+            const posD = getLabelPos(labelD);
+            const posE = getLabelPos(labelE);
+            const newPosD = label === labelD ? (left / parentRect.width) : posD;
+            const newPosE = label === labelE ? (left / parentRect.width) : posE;
+            
+            if(newPosD > newPosE){
+                // Keep them separated by maintaining the constraint
+                if(label === labelD){
+                    left = Math.min(left, newPosE * parentRect.width - 2);
+                } else if(label === labelE){
+                    left = Math.max(left, newPosD * parentRect.width + 2);
+                }
+            }
+            label.style.left = (left - label.offsetWidth/2)+'px';
+        } else {
+            const py = e.touches?e.touches[0].clientY:e.clientY; 
+            const y = py - parentRect.top - offsetY; 
+            let top = Math.max(0, Math.min(parentRect.height, y)); 
+            
+            // Get current positions
+            const posA = getLabelPos(labelA);
+            const posB = getLabelPos(labelB);
+            const posC = getLabelPos(labelC);
+            const parentH = parentRect.height;
+            
+            // Calculate new position based on current drag
+            let newPosA = label === labelA ? (top / parentH) : posA;
+            let newPosB = label === labelB ? (top / parentH) : posB;
+            let newPosC = label === labelC ? (top / parentH) : posC;
+            
+            // Enforce strict constraints: A < B < C (with minimum spacing to prevent overlap)
+            // Reduce minimal spacing to 1% so A and B can be placed closer if desired
+            const minSpacing = 0.01; // minimum 1% spacing between lines
+            
+            if(label === labelA){
+                // A cannot go below B - minSpacing
+                newPosA = Math.min(newPosA, newPosB - minSpacing);
+                newPosA = Math.max(0, newPosA);
+                top = newPosA * parentH;
+            } else if(label === labelB){
+                // B must stay between A + minSpacing and C - minSpacing
+                newPosB = Math.max(newPosB, newPosA + minSpacing);
+                newPosB = Math.min(newPosB, newPosC - minSpacing);
+                top = newPosB * parentH;
+            } else if(label === labelC){
+                // C cannot go above B + minSpacing
+                newPosC = Math.max(newPosC, newPosB + minSpacing);
+                newPosC = Math.min(newPosC, 1.0);
+                top = newPosC * parentH;
+            }
+            
+            label.style.top = (top - label.offsetHeight/2)+'px';
+        }
+        
+        computeMetricsAndPreview(); 
+    }
+    
+    function up(){
+        if(!dragging) return;
+        dragging = false;
+        label.style.pointerEvents = 'auto';
+        computeMetricsAndPreview();
+        // Persist current metadata and notify renderer so Tab 3 reflects label changes
+        try{
+            const meta = buildMetadata();
+            if(meta){
+                try { localStorage.setItem(storageKeyCurrent, JSON.stringify(meta)); } catch(e){}
+                window.dispatchEvent(new CustomEvent('handwriting:background-updated', { detail: { meta } }));
+            }
+        }catch(e){ /* ignore */ }
+    }
+    
+    function downWrapped(e){
+        try{ e.preventDefault(); e.stopPropagation(); }catch(err){}
+        // disable text selection during drag
+        try{ document.body.style.userSelect = 'none'; }catch(e){}
+        down(e); label.classList.add('dragging');
+    }
+    function upWrapped(e){
+        try{ document.body.style.userSelect = ''; }catch(e){}
+        up(e); label.classList.remove('dragging');
+    }
+  // Start dragging when the grip is used or when clicking the label itself.
+  const grip = label.querySelector('.lineGrip') || label;
+  grip.addEventListener('mousedown', downWrapped);
+  grip.addEventListener('touchstart', downWrapped, {passive:false});
+  // allow dragging also when clicking the label text (prevents accidental selection)
+  label.addEventListener('mousedown', downWrapped);
+  label.addEventListener('touchstart', downWrapped, {passive:false});
+    window.addEventListener('mousemove', move); 
+    window.addEventListener('touchmove', move, {passive:false}); 
+    window.addEventListener('mouseup', upWrapped); 
+    window.addEventListener('touchend', upWrapped);
+}
+makeDraggable(labelA); makeDraggable(labelB); makeDraggable(labelC); makeDraggable(labelD); makeDraggable(labelE);
+
+/* ---------- File load ---------- */
+fileInput.addEventListener('change', async (ev)=>{
+    const f = ev.target.files && ev.target.files[0]; if(!f) return;
+    if (f.type==='application/pdf'){
+    const arrayBuffer = await f.arrayBuffer();
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    loadingTask.promise.then(pdf => { pdf.getPage(1).then(page => {
+        const viewport = page.getViewport({ scale:1.0 });
+        const tmp = document.createElement('canvas'); const tmpCtx=tmp.getContext('2d');
+        const scale = Math.min(2, 1000/viewport.width);
+        const scaled = page.getViewport({ scale });
+        tmp.width = Math.round(scaled.width); tmp.height = Math.round(scaled.height);
+        page.render({ canvasContext: tmpCtx, viewport: scaled }).promise.then(()=>{
+        const img = new Image(); img.onload = ()=>{ imageObj = img; imageDataURL = tmp.toDataURL('image/png'); renderImageToCanvas(img); }; img.src = tmp.toDataURL('image/png');
+        });
+    }); }).catch(err=> alert('PDF render error: '+err.message));
+    } else {
+    const reader = new FileReader(); reader.onload = (e)=>{ const img = new Image(); img.onload = ()=>{ imageObj=img; imageDataURL=e.target.result; renderImageToCanvas(img); }; img.src = e.target.result; }; reader.readAsDataURL(f);
+    }
+});
+
+/* ---------- Saved backgrounds collection handling ---------- */
+function loadCollectionFromStorage(){
+    try { const raw = localStorage.getItem(storageKeyCollection); if(raw) savedCollection = JSON.parse(raw); else savedCollection = {}; } catch(e){ savedCollection = {}; }
+    try{ populateSavedSelect(); }catch(e){}
+}
+
+function saveCollectionToStorage(){
+    try { localStorage.setItem(storageKeyCollection, JSON.stringify(savedCollection)); } catch(e){ console.warn("save bg collection failed", e); }
+    populateSavedSelect();
+}
+
+function populateSavedSelect(){
+  if(!bgSavedSelect) return; // UI may be hidden/removed — abort safely
+  bgSavedSelect.innerHTML = '';
+  const keys = Object.keys(savedCollection).sort((a,b)=> (savedCollection[b].createdAt||'') - (savedCollection[a].createdAt||''));
+  const empty = document.createElement('option'); empty.value=''; empty.textContent='-- Kein Hintergrund gewählt --'; bgSavedSelect.appendChild(empty);
+  for(const id of keys){
+  const item = savedCollection[id];
+  const opt = document.createElement('option'); opt.value = id; opt.textContent = `${item.name || '(unnamed)'} — ${new Date(item.createdAt).toLocaleString()}`; bgSavedSelect.appendChild(opt);
+  }
+}
+
+function saveCurrentBackgroundAs(name){
+    if(!imageObj) return alert("Bitte zuerst Bild/PDF hochladen und Linien markieren.");
+    const meta = buildMetadata();
+    if(!meta) return alert("Keine Metadaten erzeugbar.");
+    const id = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8);
+    const item = { id, name: name || `Hintergrund ${new Date().toLocaleString()}`, meta, imageDataURL, createdAt: new Date().toISOString() };
+    savedCollection[id] = item;
+    // persist
+    saveCollectionToStorage();
+    // also set active background for renderer
+    try { localStorage.setItem(storageKeyCurrent, JSON.stringify(meta)); } catch(e){}
+  // notify other modules in same window that bg meta changed (include meta for immediate consumption)
+  try { window.dispatchEvent(new CustomEvent('handwriting:background-updated', { detail: { id, meta } })); } catch(e){}
+  alert("Hintergrund gespeichert.");
+  // ensure preset UI shows the newly saved background
+  try{ renderPresetButtons(); }catch(e){}
+}
+
+function loadSavedBackground(id){
+    if(!id || !savedCollection[id]) return alert("Kein gespeicherter Hintergrund ausgewählt.");
+    const item = savedCollection[id];
+    imageDataURL = item.imageDataURL;
+    const meta = item.meta;
+    
+    const img = new Image();
+    img.onload = ()=> { 
+        imageObj = img; 
+        // Render the image but don't reset line positions yet
+        renderImageToCanvasWithoutResetLines(img);
+        
+        // Now restore the saved line positions
+        if(meta && meta.lines){
+            setLabelTop(labelA, meta.lines.A.frac || 0.15);
+            setLabelTop(labelB, meta.lines.B.frac || 0.30);
+            setLabelTop(labelC, meta.lines.C.frac || 0.85);
+            setLabelTop(labelD, meta.lines.D.frac || 0.02);
+            setLabelTop(labelE, meta.lines.E.frac || 0.98);
+            computeMetricsAndPreview();
+        }
+    };
+    img.src = imageDataURL;
+    
+    // store as current for renderer
+    try { localStorage.setItem(storageKeyCurrent, JSON.stringify(item.meta)); } catch(e){}
+    try { window.dispatchEvent(new CustomEvent('handwriting:background-updated', { detail: { id: id, meta: item.meta } })); } catch(e){}
+}
+
+// Text preview toggle & auto-update
+try{
+  const previewToggle = document.getElementById('bgPreviewToggle');
+  const previewTextEl = document.getElementById('bgPreviewText');
+  let previewEnabled = false;
+  
+  // restore saved state
+  try { const saved = localStorage.getItem('bgPreviewEnabled_v1'); if(saved) previewEnabled = JSON.parse(saved); } catch(e){}
+  
+  if(previewToggle && previewTextEl){
+    // restore checkbox state
+    previewToggle.checked = previewEnabled;
+    
+    // toggle handler
+    previewToggle.addEventListener('change', ()=>{
+      previewEnabled = previewToggle.checked;
+      try { localStorage.setItem('bgPreviewEnabled_v1', JSON.stringify(previewEnabled)); } catch(e){}
+      if(previewEnabled){
+        renderTextPreview(previewTextEl.value || previewTextEl.placeholder || '');
+      } else {
+        redrawOverlay();
+      }
+    });
+    
+    // auto-update preview when text changes (if enabled)
+    previewTextEl.addEventListener('input', ()=>{
+      if(previewEnabled){
+        renderTextPreview(previewTextEl.value || previewTextEl.placeholder || '');
+      }
+    });
+    
+    // initial render if enabled
+    if(previewEnabled){
+      setTimeout(()=>{ renderTextPreview(previewTextEl.value || previewTextEl.placeholder || ''); }, 200);
+    }
+  }
+}catch(e){/* ignore if UI not present */}
+
+function deleteSavedBackground(id, skipConfirm){
+  if(!id || !savedCollection[id]) return alert("Kein gespeicherter Hintergrund ausgewählt.");
+  // Delete without modal confirmation (instant delete requested by user).
+  delete savedCollection[id];
+  saveCollectionToStorage();
+}
+
+/* ---------- UI bindings for save/load/delete ---------- */
+bgSaveBtn.addEventListener('click', ()=>{
+    const name = (bgNameInput && bgNameInput.value && bgNameInput.value.trim()) ? bgNameInput.value.trim() : null;
+    saveCurrentBackgroundAs(name);
+});
+
+bgLoadSavedBtn.addEventListener('click', ()=>{
+    const id = bgSavedSelect.value;
+    if(!id) return alert("Bitte einen gespeicherten Hintergrund wählen.");
+    loadSavedBackground(id);
+});
+
+bgDeleteSavedBtn.addEventListener('click', ()=>{
+    const id = bgSavedSelect.value;
+    if(!id) return alert("Bitte einen gespeicherten Hintergrund wählen.");
+    deleteSavedBackground(id);
+});
+
+/* ---------- init ---------- */
+loadCollectionFromStorage();
+  // create UI for built-in presets
+  try{ renderPresetButtons(); } catch(e){}
+  // wire reload button (in case user doesn't see presets)
+  try{
+    const reloadBtn = document.getElementById('bgPresetsReload'); if(reloadBtn) reloadBtn.addEventListener('click', ()=>{ try{ renderPresetButtons(); }catch(e){ console.error(e); } });
+  }catch(e){}
+  // If there is a current bg meta stored (for renderer), show it in metaDebug
+try {
+    const rawCurrent = localStorage.getItem(storageKeyCurrent);
+    if(rawCurrent){
+    const parsed = JSON.parse(rawCurrent);
+    metaDebug.textContent = JSON.stringify(parsed, null, 2);
+    }
+} catch(e){ /* ignore */ }
+
+  // --- Collapsible background meta debug pane (Tab 2) ---
+  (function setupBgMetaToggle(){
+    try{
+      const wrap = document.getElementById('bgMetaDebugWrap');
+      const btn = document.getElementById('bgMetaDebugToggle');
+      if(!wrap || !btn) return;
+      const storageKey = 'bgMetaDebugCollapsed_v1';
+      function setState(collapsed){
+        if(collapsed){ wrap.classList.add('collapsed'); btn.textContent = 'Anzeigen'; btn.setAttribute('aria-expanded','false'); }
+        else { wrap.classList.remove('collapsed'); btn.textContent = 'Ausblenden'; btn.setAttribute('aria-expanded','true'); }
+        try{ localStorage.setItem(storageKey, JSON.stringify({collapsed: !!collapsed})); }catch(e){}
+      }
+      // restore
+      try{ const raw = localStorage.getItem(storageKey); if(raw){ const parsed = JSON.parse(raw); setState(!!parsed.collapsed); } }
+      catch(e){ /* ignore */ }
+      btn.addEventListener('click', ()=>{ const isCollapsed = wrap.classList.contains('collapsed'); setState(!isCollapsed); });
+    }catch(e){ console.warn('setupBgMetaToggle failed', e); }
+  })();
+
+})(); // end BgModule
+
+/* ============================================================
+   Part 3: Renderer — Text -> pages with handwriting
+   - uses glyphs from handwriting_single_sample_v1
+   - uses background metadata from handwriting_background_v1
+   - live preview + PDF export
+   - Datei-Upload-Funktionalität (integriert von Tab 4)
+   ============================================================ */
+(function RenderModule(){
+  const glyphStorageKey = "handwriting_single_sample_v1";
+  const bgStorageKey = "handwriting_background_v1";
+  
+  // Helper to safely handle PDF parsing (checks if pdfjsLib is available, with fallback message).
+  async function tryParsePdf(arrayBuffer){
+    if(typeof pdfjsLib === 'undefined'){
+      throw new Error('PDF-Parsing nicht verfügbar. pdf.js-Bibliothek konnte nicht geladen werden. Versuche Seite neu zu laden oder exportiere die PDF als Text.');
+    }
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    let out = '';
+    for(let p=1;p<=pdf.numPages;p++){
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      out += content.items.map(i=>i.str).join(' ') + '\n\n';
+    }
+    return out;
+  }
+
+  // Helper to extract text from various file formats
+  async function extractTextFromFile(file){
+    const name = (file.name||'').toLowerCase();
+    try{
+      if(file.type === 'application/pdf' || name.endsWith('.pdf')){
+        const arrayBuffer = await file.arrayBuffer();
+        const out = await tryParsePdf(arrayBuffer);
+        return out;
+      }
+
+      if(name.endsWith('.docx')){
+        const ab = await file.arrayBuffer();
+        const zip = await JSZip.loadAsync(ab);
+        const doc = zip.file('word/document.xml');
+        if(!doc) return '';
+        const xmlText = await doc.async('string');
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(xmlText, 'application/xml');
+        const paras = Array.from(xml.getElementsByTagName('w:p')).map(p=>{
+          const texts = Array.from(p.getElementsByTagName('w:t')).map(t=>t.textContent||'');
+          return texts.join('');
+        });
+        return paras.join('\n\n');
+      }
+
+      if(name.endsWith('.txt') || file.type.startsWith('text/')){
+        return await file.text();
+      }
+
+      // fallback: try reading as text
+      try{ return await file.text(); }catch(e){ return '';} 
+    }catch(err){ return `\n[Fehler beim Lesen ${file.name}: ${err && err.message ? err.message : err}]\n`; }
+  }
+
+
+  // DOM
+  const inputText = document.getElementById('inputText');
+  const previewCanvas = document.getElementById('previewCanvas');
+  const previewCtx = previewCanvas.getContext('2d');
+  const renderNowBtn = document.getElementById('renderNowBtn');
+  const downloadPdfBtn = document.getElementById('downloadPdfBtn');
+  const marginLeftInput = document.getElementById('marginLeft');
+  const marginRightInput = document.getElementById('marginRight');
+  const prevPageBtn = document.getElementById('prevPageBtn');
+  const nextPageBtn = document.getElementById('nextPageBtn');
+  const currentPageIndexEl = document.getElementById('currentPageIndex');
+  const totalPagesEl = document.getElementById('totalPages');
+  const renderDebug = document.getElementById('renderDebug');
+  const renderColorButtonsContainer = document.getElementById('renderColorButtonsContainer');
+  
+
+  // state
+  let glyphCollection = {}; // from storage
+  let bgMeta = null;        // from storage
+  let bgImage = null;       // image object for background (original resolution)
+  let pagesCanvases = [];   // array of canvases (full-res)
+  let previewScale = 0.5;
+  let currentPreviewPage = 0;
+  let renderInkColor = '#000000'; // default black
+  let renderPenWidth = 6; // Stiftdicke für Tab 3 Renderer
+
+  // Load glyphs & background metadata
+  function loadGlyphsAndBg(){
+    try { glyphCollection = JSON.parse(localStorage.getItem(glyphStorageKey) || "{}"); } catch(e){ glyphCollection = {}; }
+    // migrate single-sample entries to arrays for compatibility
+    for(const k of Object.keys(glyphCollection)){
+      const v = glyphCollection[k];
+      if(v && !Array.isArray(v) && typeof v === 'object' && v.strokes) glyphCollection[k] = [v];
+    }
+    try { bgMeta = JSON.parse(localStorage.getItem(bgStorageKey) || "null"); } catch(e){ bgMeta = null; }
+    if(!bgMeta) {
+      renderDebug.textContent = "Kein Hintergrund geladen. Bitte erst Schritt 2 ausführen und Hintergrund speichern.";
+      return;
+    }
+    // create image from meta.imageDataURL
+    bgImage = new Image();
+    bgImage.onload = ()=> {
+      renderDebug.textContent = "Hintergrund geladen (Original: " + bgMeta.source.originalWidth + "×" + bgMeta.source.originalHeight + ").";
+      // initial preview render if text present
+      if(inputText.value.trim().length) renderPagesFromText(inputText.value);
+    };
+    bgImage.src = bgMeta.imageDataURL;
+  }
+  loadGlyphsAndBg();
+
+  // Listen for background updates from BgModule (same-window custom event)
+  window.addEventListener('handwriting:background-updated', (ev)=>{
+    try{
+      // If the event provides meta directly use it (faster). Otherwise reload from storage.
+      if(ev && ev.detail && ev.detail.meta){
+        try { bgMeta = ev.detail.meta; } catch(e){ bgMeta = null; }
+        if(bgMeta && bgMeta.imageDataURL){
+          bgImage = new Image();
+          bgImage.onload = ()=>{
+            renderDebug.textContent = "Hintergrund geladen (via Event).";
+            try { renderPagesFromText(inputText.value || ""); } catch(e){ scheduleRenderPreview(); }
+          };
+          bgImage.src = bgMeta.imageDataURL;
+        }
+      } else {
+        loadGlyphsAndBg();
+        try { renderPagesFromText(inputText.value || ""); } catch(e){ if(inputText.value && inputText.value.trim()) scheduleRenderPreview(); }
+      }
+    }catch(e){ console.error('bg update handling failed', e); }
+  });
+
+  // Listen for glyph collection updates (so Tab 3 always uses current samples)
+  window.addEventListener('handwriting:glyphs-updated', (ev)=>{
+    try{
+      // reload glyphs from storage only
+      try { glyphCollection = JSON.parse(localStorage.getItem(glyphStorageKey) || "{}"); } catch(e){ glyphCollection = {}; }
+      // migrate if necessary
+      for(const k of Object.keys(glyphCollection)){ const v = glyphCollection[k]; if(v && !Array.isArray(v) && typeof v === 'object' && v.strokes) glyphCollection[k] = [v]; }
+      if(inputText.value && inputText.value.trim()) scheduleRenderPreview();
+    }catch(e){ console.error('handle glyphs-updated failed', e); }
+  });
+
+  // Utilities: create a full-res canvas for a page (original background size)
+  function createPageCanvas(){
+    const w = bgMeta.source.originalWidth;
+    const h = bgMeta.source.originalHeight;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    // draw background
+    const img = new Image();
+    img.src = bgMeta.imageDataURL;
+    // draw synchronously if already loaded
+    if(bgImage && bgImage.complete){
+      ctx.drawImage(bgImage, 0, 0, w, h);
+    } else {
+      img.onload = ()=> { ctx.drawImage(img,0,0,w,h); };
+    }
+    return c;
+  }
+
+  // Helper: get glyph sample for char; returns sample object or null
+  function getGlyphSample(ch){
+    if(!glyphCollection) return null;
+    const entry = glyphCollection[ch];
+    if(!entry) return null;
+    const arr = Array.isArray(entry) ? entry : [entry];
+    // pick random variant
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  // keep computeScaleForSample (unused currently but useful later)
+  function computeScaleForSample(sample, targetLineSpacing) {
+    const canvasH = sample.canvasSize && sample.canvasSize.h ? sample.canvasSize.h : (sample.guides && sample.guides.baseline ? sample.guides.baseline * 1.5 : 600);
+    let glyphTop = Infinity, glyphBottom = -Infinity;
+    for (const s of (sample.strokes || [])) {
+        for (const p of s) {
+        if (typeof p.y === 'number') {
+            if (p.y < glyphTop) glyphTop = p.y;
+            if (p.y > glyphBottom) glyphBottom = p.y;
+        }
+        }
+    }
+    if (!isFinite(glyphTop) || !isFinite(glyphBottom)) {
+        glyphTop = canvasH * 0.25;
+        glyphBottom = canvasH * 0.75;
+    }
+    const twoThirdY = canvasH * (2/3);
+    const topPartMeasured = Math.max(0, Math.min(glyphBottom, twoThirdY) - glyphTop);
+    const bottomPartMeasured = Math.max(0, glyphBottom - Math.max(glyphTop, twoThirdY));
+    let medianTop = null;
+  try {
+    const tops = [];
+    for (const key in glyphCollection) {
+    const entries = Array.isArray(glyphCollection[key]) ? glyphCollection[key] : [glyphCollection[key]];
+    for (const s of entries){
+      if (!s || !s.strokes) continue;
+      let tTop = Infinity, tBot = -Infinity;
+      for (const ss of s.strokes) for (const pp of ss) {
+        if (typeof pp.y === 'number') {
+        if (pp.y < tTop) tTop = pp.y;
+        if (pp.y > tBot) tBot = pp.y;
+        }
+      }
+      if (!isFinite(tTop) || !isFinite(tBot)) continue;
+      const tTopPart = Math.max(0, Math.min(tBot, s.canvasSize.h * (2/3)) - tTop);
+      if (tTopPart > 0) tops.push(tTopPart);
+    }
+    }
+    if (tops.length > 0) {
+    tops.sort((a,b)=>a-b);
+    const m = Math.floor(tops.length/2);
+    medianTop = (tops.length % 2 === 1) ? tops[m] : (tops[m-1] + tops[m]) / 2;
+    }
+  } catch(e) {
+    medianTop = null;
+  }
+    const medianFallback = medianTop && medianTop > 0 ? medianTop : (twoThirdY * 0.5);
+    const effectiveTop = Math.max(
+        topPartMeasured,
+        medianFallback * 0.6,
+        twoThirdY * 0.25
+    );
+    const scaleTop = effectiveTop > 0 ? (targetLineSpacing / effectiveTop) : Infinity;
+    const scaleBottom = bottomPartMeasured > 0 ? ((targetLineSpacing / 2) / bottomPartMeasured) : Infinity;
+    let chosen = Math.min(scaleTop, scaleBottom);
+    if (!isFinite(chosen) || chosen <= 0) chosen = targetLineSpacing / Math.max(1, (twoThirdY * 0.5));
+    chosen = Math.max(0.04, Math.min(50, chosen));
+    return chosen;
+  }
+
+  // ---------- FIXED renderPagesFromText (replaces previous buggy version) ----------
+  function renderPagesFromText(text){
+    pagesCanvases = [];
+    if(!bgMeta){ renderDebug.textContent = "Kein Background-Meta vorhanden."; return []; }
+    const pageW = bgMeta.source.originalWidth;
+    const pageH = bgMeta.source.originalHeight;
+    
+    // Use D/E lines from background metadata (no margin inputs anymore)
+    let leftLimit = Math.round(0.10 * pageW); // default fallback
+    let rightLimit = Math.round(0.90 * pageW); // default fallback
+    if(bgMeta.lines && bgMeta.lines.D && bgMeta.lines.E){
+        const posD = bgMeta.lines.D.frac || 0.10;
+        const posE = bgMeta.lines.E.frac || 0.90;
+        leftLimit = Math.round(posD * pageW);
+        rightLimit = Math.round(posE * pageW);
+    }
+    
+    const usableWidth = rightLimit - leftLimit;
+
+    const posA_frac = bgMeta.lines.A.frac;
+    const posB_frac = bgMeta.lines.B.frac;
+    const posCfrac = bgMeta.lines.C ? (bgMeta.lines.C.frac || 0.85) : 0.85;
+    const pageA_y = Math.round(posA_frac * pageH);
+    const pageB_y = Math.round(posB_frac * pageH);
+    const pageC_y = Math.round(posCfrac * pageH);
+    const spacing = Math.max(2, Math.abs(pageB_y - pageA_y) || Math.round(pageH/12));
+
+    let globalGlyphCanvasH = null;
+    try {
+      for (const key in glyphCollection) {
+        const s = glyphCollection[key];
+        if (s && s.canvasSize && s.canvasSize.h) { globalGlyphCanvasH = s.canvasSize.h; break; }
+      }
+    } catch(e){ }
+    if (!globalGlyphCanvasH) globalGlyphCanvasH = 330;
+    const twoThirdHeightRef = (globalGlyphCanvasH * 2/3);
+    const uniformScale = Math.max(0.0001, spacing / Math.max(1, twoThirdHeightRef));
+
+    let firstBaselineY = pageB_y;
+    const baselines = [];
+    // Use C-line as page-end limit
+    for (let y = firstBaselineY; y < pageC_y - 10; y += spacing) baselines.push(Math.round(y));
+    if (baselines.length === 0) baselines.push(firstBaselineY);
+
+    let page = createPageCanvas();
+    let pageCtx = page.getContext('2d');
+    pageCtx.drawImage(bgImage, 0, 0, pageW, pageH);
+
+    let baselineIndex = 0;
+    let curX = leftLimit;
+    let curY = baselines[baselineIndex];
+
+    function computeBBoxFromSample(sample){
+      const xs=[], ys=[];
+      for(const s of (sample.strokes || [])) for(const p of s){ xs.push(p.x); ys.push(p.y); }
+      if(xs.length===0) return null;
+      return { xMin: Math.min(...xs), xMax: Math.max(...xs), yMin: Math.min(...ys), yMax: Math.max(...ys) };
+    }
+
+    // Tokenize input into words and whitespace (preserve newlines as separate tokens)
+    const tokens = (text||"").replace(/\r/g,'').match(/\n|[^\s]+|\s+/g) || [];
+    for (let ti = 0; ti < tokens.length; ti++) {
+      const token = tokens[ti];
+
+      // explicit newline token
+      if (token === '\n') {
+        baselineIndex++;
+        if (baselineIndex >= baselines.length) {
+          pagesCanvases.push(page);
+          page = createPageCanvas(); pageCtx = page.getContext('2d'); pageCtx.drawImage(bgImage, 0, 0, pageW, pageH);
+          baselineIndex = 0;
+          try{ renderPreviewPage(pagesCanvases.length, page); }catch(e){}
+        }
+        curX = leftLimit;
+        curY = baselines[baselineIndex];
+        continue;
+      }
+
+      // whitespace token (spaces/tabs) - advance by space width * count
+      if (/^\s+$/.test(token)) {
+        // treat each space as half line spacing
+        const spaceW = spacing * 0.5;
+        // count only space characters (tabs/newlines handled separately)
+        const count = token.split('').filter(ch => ch === ' ').length || token.length;
+        curX += spaceW * count;
+        continue;
+      }
+
+      // token is a word (sequence of non-whitespace). Measure its width first.
+      let wordWidth = 0;
+      // to approximate width, sum glyph widths (like in main loop)
+      for (let ci = 0; ci < token.length; ci++) {
+        const ch = token[ci];
+        const sample = getGlyphSample(ch);
+        let glyphWidth = 0;
+        if (sample && sample.boundingBox) {
+          glyphWidth = (sample.boundingBox.xMax - sample.boundingBox.xMin) * uniformScale;
+        } else if (sample) {
+          glyphWidth = (sample.canvasSize && sample.canvasSize.w ? sample.canvasSize.w * 0.5 : spacing * 0.5) * uniformScale;
+        } else {
+          try {
+            pageCtx.save();
+            pageCtx.font = `${Math.round(spacing * 0.8)}px serif`;
+            glyphWidth = pageCtx.measureText(ch).width;
+            pageCtx.restore();
+          } catch (e) {
+            glyphWidth = spacing * 0.6;
+          }
+        }
+        wordWidth += glyphWidth + Math.max(2, spacing * 0.08);
+      }
+
+      // if the word doesn't fit on the current line, move to next baseline
+      if (curX + wordWidth > rightLimit) {
+        // if the word itself is wider than the whole line, fall back to character layout
+        if (wordWidth > usableWidth) {
+          // fall back: render character-by-character of this token
+          for (let ci = 0; ci < token.length; ci++) {
+            const ch = token[ci];
+            const sample = getGlyphSample(ch);
+            let glyphWidth = 0;
+            if (sample && sample.boundingBox) glyphWidth = (sample.boundingBox.xMax - sample.boundingBox.xMin) * uniformScale;
+            else if (sample) glyphWidth = (sample.canvasSize && sample.canvasSize.w ? sample.canvasSize.w * 0.5 : spacing * 0.5) * uniformScale;
+            else { try { pageCtx.save(); pageCtx.font = `${Math.round(spacing * 0.8)}px serif`; glyphWidth = pageCtx.measureText(ch).width; pageCtx.restore(); } catch(e){ glyphWidth = spacing * 0.6; } }
+
+            if (curX + glyphWidth > rightLimit) {
+              baselineIndex++;
+              if (baselineIndex >= baselines.length) {
+                pagesCanvases.push(page);
+                page = createPageCanvas(); pageCtx = page.getContext('2d'); pageCtx.drawImage(bgImage, 0, 0, pageW, pageH);
+                baselineIndex = 0;
+                try{ renderPreviewPage(pagesCanvases.length, page); }catch(e){}
+              }
+              curX = leftLimit;
+              curY = baselines[baselineIndex];
+            }
+
+            const currentTopLineY = pageA_y + baselineIndex * spacing;
+            const info = drawGlyphAt(pageCtx, ch, curX, currentTopLineY, uniformScale, spacing);
+            const advance = info && info.advance ? info.advance : (spacing * 0.6);
+            curX += advance + Math.max(2, spacing * 0.08);
+          }
+        } else {
+          baselineIndex++;
+          if (baselineIndex >= baselines.length) {
+            pagesCanvases.push(page);
+            page = createPageCanvas(); pageCtx = page.getContext('2d'); pageCtx.drawImage(bgImage, 0, 0, pageW, pageH);
+            baselineIndex = 0;
+            try{ renderPreviewPage(pagesCanvases.length, page); }catch(e){}
+          }
+          curX = leftLimit;
+          curY = baselines[baselineIndex];
+        }
+      }
+
+      // render the word token character-by-character now that it fits
+      for (let ci = 0; ci < token.length; ci++) {
+        const ch = token[ci];
+        const currentTopLineY = pageA_y + baselineIndex * spacing;
+        const info = drawGlyphAt(pageCtx, ch, curX, currentTopLineY, uniformScale, spacing);
+        const advance = info && info.advance ? info.advance : (spacing * 0.6);
+        curX += advance + Math.max(2, spacing * 0.08);
+      }
+    }
+
+  pagesCanvases.push(page);
+  renderDebug.textContent = `Erstellt ${pagesCanvases.length} Seite(n). spacing=${Math.round(spacing)}px. Lines: A=${Math.round(pageA_y)}, B=${Math.round(pageB_y)}, C=${Math.round(pageC_y)}, D=${leftLimit}, E=${rightLimit}.`;
+  // show the newest page in the live preview
+  try{ renderPreviewPage(pagesCanvases.length-1); }catch(e){ renderPreviewPage(0); }
+    return pagesCanvases;
+  }
+
+  // drawGlyphAt (same signature used above)
+  function drawGlyphAt(ctx, ch, x, topLineY, scale, lineSpacing, color) {
+    const sample = getGlyphSample(ch);
+    // get current ink color: first use provided color (from editor/caller), then renderInkColor, then from glyph module, then fallback to black
+    let inkColor = color;
+    if(!inkColor){
+      if(renderInkColor) inkColor = renderInkColor;
+      else if(window.__handwritingGlyph && typeof window.__handwritingGlyph.getInkColor === 'function') inkColor = window.__handwritingGlyph.getInkColor();
+      else inkColor = '#000000';
+    }
+    
+  if (!sample) {
+        // Fallback: draw a normal keyboard character sized to the current glyph/line size.
+        // If the caller provided a computed lineSpacing (distance between baselines), use that
+        // to determine a matching font size. Otherwise, fall back to the previous heuristic.
+        ctx.save();
+        ctx.fillStyle = inkColor;
+        let fontSize;
+        if (typeof lineSpacing === 'number' && lineSpacing > 0) {
+          // use ~80% of the line spacing for the character size (matches handwritten glyph height)
+          fontSize = Math.max(8, Math.round(lineSpacing * 0.8));
+        } else {
+          fontSize = Math.max(8, Math.round((scale || 1) * 16));
+        }
+        ctx.font = `${fontSize}px serif`;
+        ctx.textBaseline = "alphabetic";
+  // place text so its alphabetic baseline matches the handwritten baseline
+  const yPos = topLineY + (typeof lineSpacing === 'number' && lineSpacing > 0 ? Math.round(lineSpacing) : 0);
+    ctx.fillText(ch, x, yPos);
+        const w = ctx.measureText(ch).width;
+        ctx.restore();
+        return { advance: w };
+    }
+
+    const bbox = sample.boundingBox && typeof sample.boundingBox.xMin === "number" && typeof sample.boundingBox.xMax === "number"
+        ? sample.boundingBox
+        : (function(){
+            const xs=[];
+            for(const s of sample.strokes || []) for(const p of s) xs.push(p.x);
+            if (!xs.length) return { xMin: 0, xMax: sample.canvasSize ? sample.canvasSize.w : 50 };
+            return { xMin: Math.min(...xs), xMax: Math.max(...xs) };
+        })();
+
+    const glyphWidth = (bbox.xMax - bbox.xMin) * scale;
+    const yTranslate = topLineY;
+    const xTranslate = x - (bbox.xMin * scale);
+
+  ctx.save();
+    for (const s of (sample.strokes || [])) {
+        if (!s || s.length === 0) continue;
+        ctx.beginPath();
+        ctx.moveTo(xTranslate + s[0].x * scale, yTranslate + s[0].y * scale);
+        for (let i = 1; i < s.length; i++) {
+          const prev = s[i-1], cur = s[i];
+          const mx = (prev.x + cur.x)/2, my = (prev.y + cur.y)/2;
+          ctx.quadraticCurveTo(xTranslate + prev.x*scale, yTranslate + prev.y*scale, xTranslate + mx*scale, yTranslate + my*scale);
+        }
+        // Use renderPenWidth and pressure to calculate stroke width
+        let strokeWidth;
+        const avgP = s.reduce((acc,p)=>acc + (p.p || 0.5), 0) / s.length;
+        strokeWidth = Math.max(0.3, renderPenWidth * Math.max(0.12, avgP) * scale);
+        
+        ctx.lineWidth = strokeWidth;
+        // prefer explicit color argument when provided (editor per-field color)
+        ctx.strokeStyle = inkColor;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    return { advance: glyphWidth };
+  }
+
+  // Render scaled preview of page index to previewCanvas
+  function renderPreviewPage(index, fallbackCanvas){
+    // if there are no finished pages yet but a fallback in-progress canvas is supplied,
+    // render that one. Otherwise clamp index to available pages.
+    if((!pagesCanvases || pagesCanvases.length===0) && !fallbackCanvas){
+      previewCtx.clearRect(0,0,previewCanvas.width,previewCanvas.height); return;
+    }
+    if(index === pagesCanvases.length && fallbackCanvas){
+      // show the in-progress page
+      currentPreviewPage = index;
+      const page = fallbackCanvas;
+      const displayW = 600; // fixed preview width
+      const scale = displayW / page.width;
+      previewCanvas.width = displayW;
+      previewCanvas.height = Math.round(page.height * scale);
+      const pctx = previewCanvas.getContext('2d');
+      pctx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
+      const dataURL = page.toDataURL('image/png');
+      const img = new Image();
+      img.onload = ()=> { pctx.drawImage(img, 0, 0, previewCanvas.width, previewCanvas.height); };
+      img.src = dataURL;
+      currentPageIndexEl.textContent = (index+1);
+      totalPagesEl.textContent = pagesCanvases.length + 1;
+      return;
+    }
+
+    index = Math.max(0, Math.min(pagesCanvases.length-1, index));
+    currentPreviewPage = index;
+    const page = pagesCanvases[index];
+    const displayW = 600; // fixed preview width
+    const scale = displayW / page.width;
+    previewCanvas.width = displayW;
+    previewCanvas.height = Math.round(page.height * scale);
+    const pctx = previewCanvas.getContext('2d');
+    pctx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
+    const dataURL = page.toDataURL('image/png');
+    const img = new Image();
+    img.onload = ()=> { pctx.drawImage(img, 0, 0, previewCanvas.width, previewCanvas.height); };
+    img.src = dataURL;
+    currentPageIndexEl.textContent = (index+1);
+    totalPagesEl.textContent = pagesCanvases.length;
+  }
+
+  // Event bindings
+  inputText.addEventListener('input', ()=> {
+    if(!bgMeta){ renderDebug.textContent = "Kein Hintergrund-Meta — bitte Teil 2 ausführen und speichern."; return; }
+    scheduleRenderPreview();
+  });
+
+  // Clear input button (Tab 3) — entfernt gesamten Text und triggert Vorschau
+  try {
+    const clearBtn = document.getElementById('clearInputTextBtn');
+    if(clearBtn){
+      clearBtn.addEventListener('click', ()=>{
+        inputText.value = '';
+        // immediately update preview
+        scheduleRenderPreview();
+        // focus textarea so user can start typing again
+        try{ inputText.focus(); }catch(e){}
+      });
+    }
+  } catch(e){ console.warn('clearInputTextBtn binding failed', e); }
+
+  let renderTimer = null;
+  function scheduleRenderPreview(){
+    if(renderTimer) clearTimeout(renderTimer);
+    renderTimer = setTimeout(()=>{
+      try { renderPagesFromText(inputText.value || ""); } catch(e){ renderDebug.textContent = "Render error: "+e.message; }
+      renderTimer = null;
+    }, 250);
+  }
+
+  renderNowBtn.addEventListener('click', ()=> { renderPagesFromText(inputText.value || ""); });
+
+  prevPageBtn.addEventListener('click', ()=> { if(currentPreviewPage>0){ renderPreviewPage(currentPreviewPage-1); }});
+  nextPageBtn.addEventListener('click', ()=> { if(currentPreviewPage < pagesCanvases.length-1) renderPreviewPage(currentPreviewPage+1); });
+
+  downloadPdfBtn.addEventListener('click', async ()=>{
+    if(!pagesCanvases || pagesCanvases.length===0){ alert("Keine Seiten zum Exportieren — bitte Text eingeben und Rendern."); return; }
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'px', format: [pagesCanvases[0].width, pagesCanvases[0].height] });
+    for(let i=0;i<pagesCanvases.length;i++){
+      const c = pagesCanvases[i];
+      const dataURL = c.toDataURL('image/png');
+      if(i > 0) pdf.addPage([c.width, c.height], 'portrait');
+      pdf.addImage(dataURL, 'PNG', 0, 0, c.width, c.height);
+    }
+    const blob = pdf.output('blob');
+    // On iOS/iPadOS direct downloads can be blocked. Use a fallback that opens
+    // the PDF blob in a new tab so the user can use the share/save sheet.
+    try{
+      if(isIOS()){
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        // revoke after a while
+        setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 60000);
+      } else {
+        saveAs(blob, 'handwritten_pages.pdf');
+      }
+    }catch(e){
+      // final fallback: try FileSaver then open URL
+      try{ saveAs(blob, 'handwritten_pages.pdf'); }catch(err){ const url = URL.createObjectURL(blob); window.open(url, '_blank'); setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },60000); }
+    }
+  });
+
+  const renderPrintBtn = document.getElementById('renderPrintBtn');
+  if(renderPrintBtn){
+    renderPrintBtn.addEventListener('click', ()=>{
+      if(!pagesCanvases || pagesCanvases.length===0){ alert("Keine Seiten zum Drucken — bitte Text eingeben und Rendern."); return; }
+      const printWindow = window.open('', '', 'width=900,height=1200');
+      printWindow.document.write('<html><head><title>Druck</title></head><body style="margin:0; padding:8px;">');
+      pagesCanvases.forEach((c, i) => {
+        const dataURL = c.toDataURL('image/png');
+        printWindow.document.write(`<div style="page-break-after:always; text-align:center;"><img src="${dataURL}" style="max-width:100%; height:auto;" /></div>`);
+      });
+      printWindow.document.write('</body></html>');
+      printWindow.document.close();
+      setTimeout(() => printWindow.print(), 300);
+    });
+  }
+
+  // On load, if storage exists, load metadata
+  function init(){
+    try { const rawGlyphs = localStorage.getItem(glyphStorageKey); if(rawGlyphs) glyphCollection = JSON.parse(rawGlyphs); } catch(e){ glyphCollection = {}; }
+    try { const rawBg = localStorage.getItem(bgStorageKey); if(rawBg) bgMeta = JSON.parse(rawBg); } catch(e){ bgMeta = null; }
+    if(bgMeta && bgMeta.imageDataURL){
+      const img = new Image();
+      img.onload = ()=> { bgImage = img; renderDebug.textContent = "Hintergrund bereit."; };
+      img.src = bgMeta.imageDataURL;
+    }
+    if(inputText.value.trim()) scheduleRenderPreview();
+  }
+  init();
+
+  // Build color buttons for render section
+  const inkColors = [
+    { name: 'Schwarz', hex: '#000000' },
+    { name: 'Dunkelblau', hex: '#1a3a52' },
+    { name: 'Hellblau', hex: '#4a7ba7' },
+    { name: 'Royalblau', hex: '#4169e1' },
+    { name: 'Himmelblau', hex: '#87ceeb' },
+    { name: 'Dunkelrot', hex: '#8b2e2e' },
+    { name: 'Rot', hex: '#dc143c' },
+    { name: 'Karminrot', hex: '#c41e3a' },
+    { name: 'Dunkelgrün', hex: '#2d5016' },
+    { name: 'Grün', hex: '#228b22' },
+    { name: 'Olivgrün', hex: '#6b8e23' },
+    { name: 'Dunkelbraun', hex: '#3e2723' },
+    { name: 'Braun', hex: '#654321' },
+    { name: 'Hellbraun', hex: '#8b6f47' },
+    { name: 'Grau', hex: '#4a4a4a' },
+    { name: 'Hellgrau', hex: '#808080' },
+    { name: 'Silbergrau', hex: '#a9a9a9' },
+    { name: 'Dunkelviolett', hex: '#4a148c' },
+    { name: 'Violett', hex: '#8b008b' },
+    { name: 'Flieder', hex: '#c8a2c8' },
+    { name: 'Indigo', hex: '#4b0082' },
+    { name: 'Orange', hex: '#ff8c00' },
+    { name: 'Dunkelorange', hex: '#d2691e' },
+    { name: 'Rostrot', hex: '#b7410e' },
+    { name: 'Teal', hex: '#008080' },
+    { name: 'Dunkelcyan', hex: '#008b8b' },
+    { name: 'Marineblau', hex: '#000080' },
+    { name: 'Schieferschwarz', hex: '#2f4f4f' },
+  ];
+
+  function buildRenderColorButtons(){
+    if(!renderColorButtonsContainer) return;
+    renderColorButtonsContainer.innerHTML = '';
+
+    // primary colors (compact)
+    const primaryColors = [
+      { name: 'Schwarz', hex: '#000000' },
+      { name: 'Grau', hex: '#4a4a4a' },
+      { name: 'Hellblau', hex: '#4a7ba7' },
+      { name: 'Grün', hex: '#228b22' }
+    ];
+
+    const primWrap = document.createElement('div'); primWrap.className = 'primary-colors';
+    for(const color of primaryColors){
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-btn';
+      btn.style.backgroundColor = color.hex;
+      btn.title = color.name;
+      btn.dataset.color = color.hex;
+      if(color.hex === renderInkColor) btn.classList.add('active');
+      btn.addEventListener('click', (e)=>{ e.preventDefault(); setRenderInkColor(color.hex); });
+      primWrap.appendChild(btn);
+    }
+    renderColorButtonsContainer.appendChild(primWrap);
+
+    // More colors toggle
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button'; moreBtn.className = 'more-colors-button'; moreBtn.setAttribute('aria-expanded','false');
+    moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle"><path d="M12 6a2 2 0 110-4 2 2 0 010 4zM12 14a2 2 0 110-4 2 2 0 010 4zM12 22a2 2 0 110-4 2 2 0 010 4z" fill="#334"/></svg> Mehr Farben';
+    renderColorButtonsContainer.appendChild(moreBtn);
+
+    // full palette (initially hidden)
+    const fullWrap = document.createElement('div'); fullWrap.className = 'full-color-palette'; fullWrap.style.display = 'none';
+    const primaryHexes = new Set(primaryColors.map(c=>c.hex.toLowerCase()));
+    for(const color of inkColors){
+      if(primaryHexes.has(color.hex.toLowerCase())) continue;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'color-btn';
+      btn.style.backgroundColor = color.hex;
+      btn.title = color.name;
+      btn.dataset.color = color.hex;
+      if(color.hex === renderInkColor) btn.classList.add('active');
+      btn.addEventListener('click', (e)=>{ e.preventDefault(); setRenderInkColor(color.hex); });
+      fullWrap.appendChild(btn);
+    }
+    renderColorButtonsContainer.appendChild(fullWrap);
+
+    moreBtn.addEventListener('click', ()=>{
+      const open = fullWrap.style.display !== 'none';
+      fullWrap.style.display = open ? 'none' : 'flex';
+      moreBtn.setAttribute('aria-expanded', String(!open));
+    });
+  }
+
+  function setRenderInkColor(hexColor){
+    renderInkColor = hexColor;
+    try{ localStorage.setItem('renderInkColor_v1', JSON.stringify({color: hexColor})); }catch(e){}
+    buildRenderColorButtons();
+    scheduleRenderPreview();
+  }
+
+  // Load render settings from storage
+  try {
+    const stored = localStorage.getItem('renderInkColor_v1');
+    if(stored) {
+      const obj = JSON.parse(stored);
+      if(obj && obj.color) renderInkColor = obj.color;
+    }
+  } catch(e){}
+
+  buildRenderColorButtons();
+
+  // Render pen width slider removed; fixed legacy base width (6px) is used instead.
+
+  // File upload handlers (integriert von Tab 4)
+  const toggleFileInputBtn = document.getElementById('toggleFileInputBtn');
+  const renderFileInput = document.getElementById('renderFileInput');
+  if(toggleFileInputBtn && renderFileInput){
+    toggleFileInputBtn.addEventListener('click', ()=>{ renderFileInput.click(); });
+  }
+  if(renderFileInput){
+    renderFileInput.addEventListener('change', async (ev)=>{
+      const files = Array.from(ev.target.files || []);
+      if(files.length===0) return;
+      inputText.value = '';
+      let combined = '';
+      for(const f of files){
+        inputText.value = `Lese ${f.name} ...`;
+        const t = await extractTextFromFile(f);
+        combined += t + '\n\n';
+      }
+      inputText.value = combined.trim();
+      scheduleRenderPreview();
+      // Reset file input
+      renderFileInput.value = '';
+    });
+  }
+
+  // Wire up render pen width slider
+  (function setupRenderPenWidthSlider(){
+    try {
+      const el = document.getElementById('renderPenWidthRange');
+      const val = document.getElementById('renderPenWidthValue');
+      // Restore saved value
+      try {
+        const raw = localStorage.getItem('renderPenWidth_v1');
+        if(raw) {
+          const parsed = JSON.parse(raw);
+          if(typeof parsed.width === 'number') renderPenWidth = parsed.width;
+        }
+      } catch(e) {}
+      // Update UI
+      if(el) el.value = renderPenWidth;
+      if(val) val.textContent = String(renderPenWidth);
+      // Event listener for changes
+      if(el) {
+        el.addEventListener('input', (ev)=> {
+          renderPenWidth = parseFloat(el.value || 6);
+          if(val) val.textContent = String(renderPenWidth);
+          try { localStorage.setItem('renderPenWidth_v1', JSON.stringify({ width: renderPenWidth })); } catch(e){}
+          scheduleRenderPreview();
+        });
+      }
+    } catch(e) {
+      console.warn('setupRenderPenWidthSlider failed', e);
+    }
+  })();
+
+  // Expose render function for manual usage
+  window.__handwritingRender = { renderPagesFromText, drawGlyphAt, getInkColor: ()=>renderInkColor, getPenWidth: ()=>renderPenWidth };
+})();
+
+  /* ============================================================
+     Editor Module (Tab 4) — Dokument-Editor
+     - edits are managed with localStorage 'handwriting_editor_fields'
+     - renders using glyphs from handwriting_single_sample_v1
+     ============================================================ */
+  (function EditorModule(){
+    const addFieldBtn = document.getElementById('editorAddFieldBtn');
+    const clearFieldsBtn = document.getElementById('editorClearFieldsBtn');
+    const fieldsList = document.getElementById('editorFieldsList');
+    const exportPngBtn = document.getElementById('editorExportPngBtn');
+    const printBtn = document.getElementById('editorPrintBtn');
+    const editorBgFileInput = document.getElementById('editorBgFileInput');
+    const editorPagePrev = document.getElementById('editorPagePrev');
+    const editorPageNext = document.getElementById('editorPageNext');
+    const editorPageIndicator = document.getElementById('editorPageIndicator');
+    const editorFontSizeInput = document.getElementById('editorFontSizeInput');
+    const overlay = document.getElementById('editorOverlay');
+    const editorBgImg = document.getElementById('editorBgImg');
+
+  // editor background pages (data URLs) and current page index
+      let editorBackgroundPages = [];
+      let currentEditorBgPage = 0;
+  // base font size (px) used for contenteditable fields (numeric Textgröße)
+  let editorBaseFontSize = 14;
+
+      // wire UI buttons: add / clear fields
+      if(addFieldBtn){
+        addFieldBtn.addEventListener('click', ()=>{
+          const f = createField('', { left: '60px', top: '60px', width: '240px', height: '80px', fontSize: editorBaseFontSize, html: false });
+          try{ saveFieldsToStorage(); }catch(e){}
+          try{ updateGlyphCanvas(); }catch(e){}
+          try{ f.focus(); }catch(e){}
+        });
+      }
+      if(clearFieldsBtn){
+        clearFieldsBtn.addEventListener('click', ()=>{
+          if(!confirm('Alle Felder wirklich löschen?')) return;
+          const all = Array.from(overlay.querySelectorAll('.editor-text-field'));
+          all.forEach(n=>n.remove());
+          fieldsList.innerHTML = '';
+          try{ localStorage.removeItem('handwriting_editor_fields_v1'); }catch(e){}
+          try{ updateGlyphCanvas(); }catch(e){}
+        });
+      }
+
+      // extract lines with per-segment font sizes from a contenteditable field
+      function extractLinesWithFont(el){
+        const defaultFont = parseFloat(window.getComputedStyle(el).fontSize) || editorBaseFontSize;
+        const lines = [];
+        let curLine = [];
+
+        function pushLine(){ if(curLine.length) lines.push(curLine); curLine = []; }
+
+        function walk(node, inheritedFont){
+          if(node.nodeType === Node.TEXT_NODE){
+            const txt = node.nodeValue || '';
+            const parts = txt.split('\n');
+            for(let i=0;i<parts.length;i++){
+              if(parts[i].length) curLine.push({ text: parts[i], fontSize: inheritedFont });
+              if(i < parts.length-1) pushLine();
+            }
+            return;
+          }
+          if(node.nodeType === Node.ELEMENT_NODE){
+            const tag = node.tagName && node.tagName.toLowerCase();
+            if(tag === 'br'){ pushLine(); return; }
+            let nodeFont = inheritedFont;
+            try{ const s = node.style && node.style.fontSize; if(s){ const n = parseFloat(s); if(!isNaN(n)) nodeFont = n; } }catch(e){}
+            const blockTags = { 'div':1, 'p':1, 'li':1 };
+            if(blockTags[tag]){ if(curLine.length) pushLine(); for(const ch of Array.from(node.childNodes)) walk(ch, nodeFont); if(curLine.length) pushLine(); return; }
+            for(const ch of Array.from(node.childNodes)) walk(ch, nodeFont);
+          }
+        }
+
+        for(const n of Array.from(el.childNodes)) walk(n, defaultFont);
+        if(curLine.length) pushLine();
+        return lines;
+      }
+
+      function exportEditorAsCanvas(pageIndex){
+        // create a high-res offscreen canvas for export
+        const container = document.getElementById('editorPreviewContainer');
+        const bgImg = document.getElementById('editorBgImg');
+        // if a pageIndex is provided and we have a page image, use its natural size for canvas
+        let w = container.offsetWidth || bgImg.naturalWidth || 800;
+        let h = container.offsetHeight || bgImg.naturalHeight || 600;
+        let bgSrc = bgImg.src;
+        if(typeof pageIndex === 'number' && editorBackgroundPages && editorBackgroundPages[pageIndex]){
+          bgSrc = editorBackgroundPages[pageIndex];
+          // create an image to measure natural size
+          const tmp = new Image(); tmp.src = bgSrc;
+          if(tmp.naturalWidth && tmp.naturalHeight){ w = tmp.naturalWidth; h = tmp.naturalHeight; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        // draw bg
+        if(bgSrc){
+          const img = new Image(); img.src = bgSrc;
+          // draw synchronously if already loaded
+          if(img.complete && img.naturalWidth){ ctx.drawImage(img, 0, 0, w, h); }
+          else {
+            // draw when loaded (rare path). Note: export caller may need to wait.
+            img.onload = ()=> { try{ ctx.drawImage(img,0,0,w,h); }catch(e){} };
+          }
+        }
+        
+        // draw text fields using glyphs (like Tab 3)
+        const fields = document.getElementById('editorOverlay').querySelectorAll('.editor-text-field');
+        const renderer = window.__handwritingRender;
+
+        if(renderer && typeof renderer.drawGlyphAt === 'function'){
+          fields.forEach(f => {
+            const x = parseFloat(f.style.left || 50);
+            const y = parseFloat(f.style.top || 50);
+            const lines = extractLinesWithFont(f);
+            if(!lines || lines.length === 0) return;
+            const fieldDefaultFont = parseFloat(window.getComputedStyle(f).fontSize) || editorBaseFontSize;
+            let curY = y + Math.round(fieldDefaultFont * 0.8);
+            for(let li=0; li<lines.length; li++){
+              if(li>0) curY += Math.round(fieldDefaultFont * 1.2);
+              let curX = x + 3;
+              const segs = lines[li];
+              for(const seg of segs){
+                const segText = seg.text || '';
+                const segFont = typeof seg.fontSize === 'number' ? seg.fontSize : fieldDefaultFont;
+                  // apply per-field handwritten scale multiplier if present
+                  const handScaleFactor = parseFloat(f.dataset.handScale) || 1.0;
+                  const effectiveScale = (segFont / 32) * handScaleFactor;
+                  const fieldColor = f.dataset.color || f.style.color || '#000000';
+                for(let ci=0; ci<segText.length; ci++){
+                  const ch = segText[ci];
+                  try{
+                      const info = renderer.drawGlyphAt(ctx, ch, curX, curY, effectiveScale, Math.round(segFont * 1.2), fieldColor);
+                    const adv = (info && info.advance) ? info.advance : Math.round(segFont * 0.6);
+                    curX += adv + Math.max(2, Math.round(segFont * 0.06));
+                  }catch(e){ curX += Math.max(8, Math.round(segFont * 0.5)); }
+                }
+              }
+            }
+          });
+        }
+        return canvas;
+      }
+
+      if(exportPngBtn){ exportPngBtn.addEventListener('click', async ()=>{
+        try{
+          if(editorBackgroundPages && editorBackgroundPages.length > 1){
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ unit: 'px', format: [800, 1120] });
+            for(let i=0;i<editorBackgroundPages.length;i++){
+              const c = exportEditorAsCanvas(i);
+              const dataURL = c.toDataURL('image/png');
+              if(i>0) pdf.addPage([c.width, c.height], 'portrait');
+              pdf.addImage(dataURL, 'PNG', 0, 0, c.width, c.height);
+            }
+            const blob = pdf.output('blob');
+            try{
+              if(isIOS()){
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },60000);
+              } else {
+                saveAs(blob, 'editor_export.pdf');
+              }
+            }catch(e){ try{ saveAs(blob, 'editor_export.pdf'); }catch(err){ const url = URL.createObjectURL(blob); window.open(url, '_blank'); setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },60000); } }
+          } else {
+            const canvas = exportEditorAsCanvas(currentEditorBgPage);
+            const dataUrl = canvas.toDataURL('image/png');
+            try{
+              if(isIOS()){
+                // open image in new tab so user can long-press/save
+                window.open(dataUrl, '_blank');
+              } else {
+                const link = document.createElement('a');
+                link.href = dataUrl;
+                link.download = 'editor_export.png';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }
+            }catch(e){ const link = document.createElement('a'); link.href = dataUrl; link.download = 'editor_export.png'; document.body.appendChild(link); link.click(); document.body.removeChild(link); }
+          }
+        }catch(e){ alert('Export fehlgeschlagen: '+(e.message||e)); }
+      }); }
+
+      if(printBtn){ printBtn.addEventListener('click', ()=>{
+        try{
+          if(editorBackgroundPages && editorBackgroundPages.length > 1){
+            // print as PDF
+            (async ()=>{
+              const { jsPDF } = window.jspdf;
+              const pdf = new jsPDF({ unit: 'px', format: [800, 1120] });
+              for(let i=0;i<editorBackgroundPages.length;i++){
+                const c = exportEditorAsCanvas(i);
+                const dataURL = c.toDataURL('image/png');
+                if(i>0) pdf.addPage([c.width, c.height], 'portrait');
+                pdf.addImage(dataURL, 'PNG', 0, 0, c.width, c.height);
+              }
+              const blob = pdf.output('blob');
+              const url = URL.createObjectURL(blob);
+              const w = window.open(url);
+              setTimeout(()=>{ w.print(); }, 500);
+            })();
+          } else {
+            const canvas = exportEditorAsCanvas(currentEditorBgPage);
+            const printWindow = window.open('', '', 'width=800,height=600');
+            printWindow.document.write(`<html><head><title>Editor Drucken</title></head><body style="margin:0;"><img src="${canvas.toDataURL('image/png')}" style="width:100%; max-width:100vw;" /></body></html>`);
+            printWindow.document.close();
+            setTimeout(() => printWindow.print(), 250);
+          }
+        }catch(e){ alert('Druck fehlgeschlagen: '+(e.message||e)); }
+      }); }
+
+      function makeDraggableResizable(el){
+        el.style.position='absolute'; el.style.left=el.style.left||'50px'; el.style.top=el.style.top||'50px'; el.style.width=el.style.width||'200px'; el.style.height=el.style.height||'80px';
+        el.setAttribute('contenteditable','true');
+        // drag — only enabled when not in edit mode
+        let dragging=false, ox=0, oy=0, isEditing=false;
+        // detect edge for dragging (only left/top edge, ~10px)
+        function isNearEdge(e, el){
+          const rect = el.getBoundingClientRect();
+          const edgeSize = 10;
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          return (x < edgeSize && y < edgeSize) || (y < edgeSize) || (x < edgeSize);
+        }
+        el.addEventListener('mousedown', (e)=>{
+          if(e.target.classList && e.target.classList.contains('resize-handle')) return;
+          if(isEditing) return; // prevent drag during edit mode
+          if(!isNearEdge(e, el)) return; // only drag from edge
+          dragging=true; ox=e.clientX - el.offsetLeft; oy=e.clientY - el.offsetTop; el.style.cursor='move'; e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e)=>{ if(!dragging) return; el.style.left = (e.clientX - ox) + 'px'; el.style.top = (e.clientY - oy) + 'px'; saveFieldsToStorage(); updateGlyphCanvas(); });
+        window.addEventListener('mouseup', ()=>{ if(dragging){ dragging=false; el.style.cursor='default'; } });
+        // resize
+        const rh = document.createElement('div'); rh.className='resize-handle'; el.appendChild(rh);
+        let resizing=false, rsx=0, rsy=0, startW=0, startH=0;
+        rh.addEventListener('mousedown', (e)=>{ e.stopPropagation(); resizing=true; rsx=e.clientX; rsy=e.clientY; startW=el.offsetWidth; startH=el.offsetHeight; e.preventDefault(); });
+        window.addEventListener('mousemove', (e)=>{ if(!resizing) return; const dx=e.clientX-rsx, dy=e.clientY-rsy; el.style.width = Math.max(40, startW + dx) + 'px'; el.style.height = Math.max(24, startH + dy) + 'px'; saveFieldsToStorage(); updateGlyphCanvas(); });
+        window.addEventListener('mouseup', ()=>{ if(resizing) resizing=false; });
+        // double click to edit: enters edit mode and prevents dragging
+        el.addEventListener('dblclick', (ev)=>{
+          ev.stopPropagation();
+          isEditing = true;
+          el.classList.add('editing');
+          el.focus();
+          // place caret at end
+          const range = document.createRange(); range.selectNodeContents(el); range.collapse(false);
+          const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        });
+        // on blur: exit edit mode
+        el.addEventListener('blur', (ev)=>{ isEditing = false; el.classList.remove('editing'); saveFieldsToStorage(); updateGlyphCanvas(); });
+        // update glyph canvas on input
+        el.addEventListener('input', updateGlyphCanvas);
+      }
+
+      // handle background file uploads (images or PDF)
+      if(editorBgFileInput){
+        editorBgFileInput.addEventListener('change', async (ev)=>{
+          const file = ev.target.files && ev.target.files[0];
+          if(!file) return;
+          editorBackgroundPages = [];
+          try{
+            if(file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')){
+              const arrayBuffer = await file.arrayBuffer();
+              const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+              for(let i=1;i<=pdf.numPages;i++){
+                const page = await pdf.getPage(i);
+                const vp = page.getViewport({ scale: 1.5 });
+                const canvas = document.createElement('canvas'); canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+                const pctx = canvas.getContext('2d');
+                await page.render({ canvasContext: pctx, viewport: vp }).promise;
+                editorBackgroundPages.push(canvas.toDataURL('image/png'));
+              }
+            } else {
+              // image file(s) — support multiple images by using first selected for now
+              const files = Array.from(editorBgFileInput.files || []);
+              for(const f of files){
+                const url = URL.createObjectURL(f);
+                // load image and convert to dataURL
+                const img = await new Promise((res, rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+                const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img,0,0); editorBackgroundPages.push(c.toDataURL('image/png'));
+              }
+            }
+            currentEditorBgPage = 0;
+            if(editorBackgroundPages.length>0){ document.getElementById('editorBgImg').src = editorBackgroundPages[0]; }
+            updateEditorPageIndicator(); updateGlyphCanvas();
+          }catch(err){ console.warn('Background upload failed', err); alert('Laden der Datei fehlgeschlagen: '+(err && err.message ? err.message : err)); }
+        });
+      }
+
+      function updateEditorPageIndicator(){
+        const total = editorBackgroundPages ? editorBackgroundPages.length : 0;
+        const idx = (typeof currentEditorBgPage === 'number') ? (currentEditorBgPage + 1) : 0;
+        const el = document.getElementById('editorPageIndicator'); if(el) el.textContent = `Seite ${idx} / ${total}`;
+      }
+
+      if(editorPagePrev){ editorPagePrev.addEventListener('click', ()=>{ if(!editorBackgroundPages || editorBackgroundPages.length===0) return; currentEditorBgPage = Math.max(0, currentEditorBgPage-1); document.getElementById('editorBgImg').src = editorBackgroundPages[currentEditorBgPage]; updateEditorPageIndicator(); updateGlyphCanvas(); }); }
+      if(editorPageNext){ editorPageNext.addEventListener('click', ()=>{ if(!editorBackgroundPages || editorBackgroundPages.length===0) return; currentEditorBgPage = Math.min(editorBackgroundPages.length-1, currentEditorBgPage+1); document.getElementById('editorBgImg').src = editorBackgroundPages[currentEditorBgPage]; updateEditorPageIndicator(); updateGlyphCanvas(); }); }
+
+      if(editorFontSizeInput){ editorFontSizeInput.addEventListener('input', ()=>{ try{ const v = parseInt(editorFontSizeInput.value||'14',10); editorBaseFontSize = Math.max(6, Math.min(128, v)); // do NOT change existing fields - only new fields inherit this value
+        // If a field is focused and text is selected, apply the size to the selection instead
+        try{
+          const focused = document.activeElement;
+          if(focused && focused.classList && focused.classList.contains('editor-text-field')){
+            const applied = applyFontSizeToSelection(focused, Math.max(1, Math.min(256, v)));
+            if(!applied){
+              // if nothing selected, change the whole field font size
+              focused.style.fontSize = Math.max(1, Math.min(256, v)) + 'px';
+            }
+          }
+        }catch(e){}
+        try{ localStorage.setItem('handwriting_editor_fontsize_v1', JSON.stringify({ px: editorBaseFontSize })); }catch(e){} }catch(e){} });
+        // restore saved font size
+        try{ const raw = localStorage.getItem('handwriting_editor_fontsize_v1'); if(raw){ const parsed = JSON.parse(raw); if(parsed && typeof parsed.px === 'number'){ editorBaseFontSize = parsed.px; if(editorFontSizeInput) editorFontSizeInput.value = String(editorBaseFontSize); } } }catch(e){}
+      }
+
+      function updateGlyphCanvas(){
+        // render glyphs on the overlay canvas
+        const glyphCanvas = document.getElementById('editorGlyphCanvas');
+        if(!glyphCanvas) return;
+        const container = document.getElementById('editorPreviewContainer');
+        glyphCanvas.width = container.offsetWidth || 800;
+        glyphCanvas.height = container.offsetHeight || 600;
+        const ctx = glyphCanvas.getContext('2d');
+        ctx.clearRect(0, 0, glyphCanvas.width, glyphCanvas.height);
+        
+  const fields = overlay.querySelectorAll('.editor-text-field');
+  // use each field's own font-size for rendering; do not override visible sizes here
+  // (fields keep their individual fontSize set when created or edited)
+        const renderer = window.__handwritingRender;
+        
+        if(!renderer || typeof renderer.drawGlyphAt !== 'function') return;
+        
+        
+
+        fields.forEach(f => {
+          const x = parseFloat(f.style.left || 50);
+          const y = parseFloat(f.style.top || 50);
+          const lines = extractLinesWithFont(f);
+          if(!lines || lines.length === 0) return;
+          const fieldDefaultFont = parseFloat(window.getComputedStyle(f).fontSize) || editorBaseFontSize;
+          let curY = y + Math.round(fieldDefaultFont * 0.8);
+          for(let li=0; li<lines.length; li++){
+            if(li>0) curY += Math.round(fieldDefaultFont * 1.2);
+            let curX = x + 3;
+            const segs = lines[li];
+            for(const seg of segs){
+              const segText = seg.text || '';
+              const segFont = typeof seg.fontSize === 'number' ? seg.fontSize : fieldDefaultFont;
+              const handScaleFactor = parseFloat(f.dataset.handScale) || 1.0;
+              const effectiveScale = (segFont / 32) * handScaleFactor;
+              const fieldColor = f.dataset.color || f.style.color || '#000000';
+              for(let ci=0; ci<segText.length; ci++){
+                const ch = segText[ci];
+                try{
+                  const info = renderer.drawGlyphAt(ctx, ch, curX, curY, effectiveScale, Math.round(segFont * 1.2), fieldColor);
+                  const adv = (info && info.advance) ? info.advance : Math.round(segFont * 0.6);
+                  curX += adv + Math.max(2, Math.round(segFont * 0.06));
+                }catch(e){ console.warn('Glyph rendering error:', e); curX += Math.max(8, Math.round(segFont * 0.5)); }
+              }
+            }
+          }
+        });
+      }
+
+      function saveFieldsToStorage(){
+        // persist innerHTML so per-selection font-size spans are kept
+        const fields = Array.from(overlay.querySelectorAll('.editor-text-field')).map((el, idx) => ({
+          left: el.style.left || '50px',
+          top: el.style.top || '50px',
+          width: el.style.width || '200px',
+          height: el.style.height || '80px',
+          text: el.innerHTML || '',
+          fontSize: parseFloat(el.style.fontSize) || editorBaseFontSize,
+          color: el.dataset.color || el.style.color || '#000000',
+          handScale: parseFloat(el.dataset.handScale) || 1.0
+        }));
+        localStorage.setItem('handwriting_editor_fields_v1', JSON.stringify(fields));
+      }
+
+      function loadFieldsFromStorage(){
+        try{
+          const raw = localStorage.getItem('handwriting_editor_fields_v1');
+          if(!raw) return;
+          const fields = JSON.parse(raw);
+          if(!Array.isArray(fields)) return;
+          fields.forEach(fld => createField(fld.text, { left: fld.left, top: fld.top, width: fld.width, height: fld.height, fontSize: fld.fontSize, color: fld.color, handScale: fld.handScale, html: true }));
+          updateGlyphCanvas();
+        }catch(e){ console.log('Fehler beim Laden der Editor-Felder:', e); }
+      }
+
+      // Apply font size to current selection inside a field. If selection is collapsed or outside the field, return false.
+      function applyFontSizeToSelection(fieldEl, newSize){
+        try{
+          const sel = window.getSelection(); if(!sel || sel.rangeCount===0) return false;
+          const range = sel.getRangeAt(0);
+          if(!fieldEl.contains(range.commonAncestorContainer)) return false;
+          if(range.collapsed) return false; // nothing selected
+
+          // Extract contents and wrap in span with style
+          const span = document.createElement('span'); span.style.fontSize = (newSize) + 'px';
+          // Be careful: if selection includes partial element nodes, extractContents will return DocumentFragment
+          const frag = range.extractContents();
+          // If frag is empty, nothing to do
+          if(!frag || (frag.childNodes && frag.childNodes.length===0)) return false;
+          span.appendChild(frag);
+          range.insertNode(span);
+          // Move caret after inserted span
+          sel.removeAllRanges();
+          const newRange = document.createRange(); newRange.setStartAfter(span); newRange.collapse(true); sel.addRange(newRange);
+          return true;
+        }catch(e){ console.warn('applyFontSizeToSelection failed', e); return false; }
+      }
+
+      function createField(text, opts){
+        opts = opts || {};
+        const f = document.createElement('div'); f.className='editor-text-field'; f.innerText = text || '';
+        // if HTML content was provided, restore it (so inline spans/formatting are preserved)
+        try{
+          if(opts.html){ f.innerHTML = text || ''; }
+          else { f.innerText = text || ''; }
+        }catch(e){ f.innerText = text || ''; }
+        // match visible font size: prefer an explicit per-field size (opts.fontSize), otherwise inherit the current global Textgröße
+        try{ const fs = (typeof opts.fontSize === 'number') ? opts.fontSize : (opts.fontSize ? parseFloat(opts.fontSize) : null); f.style.fontSize = (fs || editorBaseFontSize) + 'px'; }catch(e){}
+        // per-field handwritten scale (multiplier) and color
+        try{ f.dataset.handScale = (typeof opts.handScale === 'number') ? String(opts.handScale) : (opts.handScale?String(opts.handScale): '1.0'); }catch(e){ f.dataset.handScale = '1.0'; }
+        try{ f.dataset.color = opts.color || opts.color === '' ? (opts.color || '#000000') : (f.dataset.color || '#000000'); f.style.color = f.style.color || (opts.color || '#000000'); }catch(e){ f.dataset.color = '#000000'; }
+        f.style.left = opts.left || '50px'; f.style.top = opts.top || '50px'; f.style.width = opts.width || '200px'; f.style.height = opts.height || '80px';
+        overlay.appendChild(f); makeDraggableResizable(f);
+        // add to list
+        const li = document.createElement('div'); li.className='small'; li.textContent = (text||'Textfeld');
+        const del = document.createElement('button'); del.type='button'; del.textContent='Löschen'; del.addEventListener('click', ()=>{ f.remove(); li.remove(); saveFieldsToStorage(); });
+        li.appendChild(del); fieldsList.appendChild(li);
+  // save on contenteditable changes
+  f.addEventListener('input', saveFieldsToStorage);
+  // focus: show toolbar for per-field controls
+  f.addEventListener('focus', (ev)=>{ try{ showFieldToolbar(f); }catch(e){} });
+  // on blur, remove editing state and save
+  f.addEventListener('blur', (ev)=>{ try{ f.classList.remove('editing'); saveFieldsToStorage(); // delay hiding so clicks into the toolbar don't immediately close it
+      setTimeout(()=>{
+        try{
+          const ae = document.activeElement;
+          // keep toolbar visible when the new active element is inside the toolbar
+          if(typeof fieldToolbar !== 'undefined' && fieldToolbar && ae && fieldToolbar.contains(ae)){
+            return; // do not hide
+          }
+        }catch(e){}
+        try{ hideFieldToolbar(); }catch(e){}
+      }, 10);
+    }catch(e){} });
+        // doppelklick: wurde in makeDraggableResizable implementiert
+        return f;
+      }
+
+      // load fields on init
+      loadFieldsFromStorage();
+
+      // expose some helpers for testing
+      window.__handwritingEditor = { createField, loadFieldsFromStorage, saveFieldsToStorage };
+      // -------- field toolbar (per-field font-size & color) --------
+      let activeField = null;
+      const fieldToolbar = document.createElement('div');
+      fieldToolbar.className = 'field-toolbar';
+      fieldToolbar.style.display = 'none';
+      fieldToolbar.innerHTML = `
+        <label style="font-size:11px; color:#fff; align-self:center;">Tastatur(px)</label>
+        <input id="toolbarKbdSize" type="number" min="6" max="256" step="1" style="width:64px;" />
+        <label style="font-size:11px; color:#fff; align-self:center;">Handschrift x</label>
+        <input id="toolbarHandScale" type="number" min="0.2" max="4" step="0.05" style="width:64px;" />
+        <input id="toolbarColor" type="color" title="Farbe" style="width:36px; height:28px; padding:0; margin-left:6px;" />
+        <button id="toolbarClose">OK</button>
+      `;
+      document.body.appendChild(fieldToolbar);
+      const toolbarKbd = fieldToolbar.querySelector('#toolbarKbdSize');
+      const toolbarHand = fieldToolbar.querySelector('#toolbarHandScale');
+      const toolbarColor = fieldToolbar.querySelector('#toolbarColor');
+      const toolbarClose = fieldToolbar.querySelector('#toolbarClose');
+
+      function showFieldToolbar(field){
+        if(!field) return hideFieldToolbar();
+        activeField = field;
+        const rect = field.getBoundingClientRect();
+        // position toolbar above the field if possible
+        fieldToolbar.style.left = (window.scrollX + rect.left) + 'px';
+        fieldToolbar.style.top = (window.scrollY + rect.top - 44) + 'px';
+        fieldToolbar.style.display = 'inline-flex';
+        // populate values
+        const kbd = parseInt(window.getComputedStyle(field).fontSize) || editorBaseFontSize;
+        const hand = parseFloat(field.dataset.handScale) || 1.0;
+        const color = field.dataset.color || field.style.color || '#000000';
+        try{ toolbarKbd.value = String(kbd); }catch(e){}
+        try{ toolbarHand.value = String(hand); }catch(e){}
+        try{ toolbarColor.value = color; }catch(e){}
+      }
+
+      function hideFieldToolbar(){
+        activeField = null; fieldToolbar.style.display = 'none';
+      }
+
+      toolbarKbd.addEventListener('input', ()=>{
+        if(!activeField) return; const v = parseInt(toolbarKbd.value||String(editorBaseFontSize),10); activeField.style.fontSize = (isNaN(v)?editorBaseFontSize:v) + 'px'; saveFieldsToStorage(); updateGlyphCanvas();
+      });
+      toolbarHand.addEventListener('input', ()=>{
+        if(!activeField) return; const v = parseFloat(toolbarHand.value||'1.0'); activeField.dataset.handScale = isNaN(v)?'1.0':String(v); saveFieldsToStorage(); updateGlyphCanvas();
+      });
+      toolbarColor.addEventListener('input', ()=>{
+        if(!activeField) return; const v = toolbarColor.value || '#000000'; activeField.dataset.color = v; activeField.style.color = v; saveFieldsToStorage(); updateGlyphCanvas();
+      });
+      toolbarClose.addEventListener('click', ()=>{ hideFieldToolbar(); try{ if(activeField) activeField.blur(); }catch(e){} });
+
+      // hide toolbar when clicking outside
+      window.addEventListener('pointerdown', (ev)=>{
+        if(!fieldToolbar.contains(ev.target) && activeField && !(ev.target && ev.target.classList && ev.target.classList.contains('editor-text-field'))){ hideFieldToolbar(); }
+      });
+  })();
+
+  /* Small CSS tweak: hide the raw keyboard text in editor preview but keep caret visible for editing */
+  (function(){
+    try{
+      const s = document.createElement('style');
+  s.textContent = `.editor-text-field { color: #111 !important; caret-color: #111 !important; }
+  .editor-text-field::selection { background: rgba(11,118,255,0.12) !important; }
+  /* when a field is in editing mode, add a subtle background */
+  .editor-text-field.editing { background: rgba(255,255,255,0.92); }
+  .field-toolbar { position:absolute; z-index:1200; display:inline-flex; gap:6px; background:rgba(0,0,0,0.7); color:#fff; padding:6px; border-radius:6px; font-size:12px; }
+  .field-toolbar button{ background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.12); padding:4px 6px; border-radius:4px; cursor:pointer; }
+  `;
+      document.head.appendChild(s);
+    }catch(e){}
+  })();
+
+</script>
+</body>
+</html>
